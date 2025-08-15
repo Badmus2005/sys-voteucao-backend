@@ -4,6 +4,7 @@
 // Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
 // Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
 
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -13,7 +14,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-
 model User {
   id                Int               @id @default(autoincrement())
   email             String            @unique
@@ -21,15 +21,15 @@ model User {
   role              Role              @default(ADMIN)
   createdAt         DateTime          @default(now())
 
-  etudiant          Etudiant?         @relation("UserEtudiant")
-  admin             Admin?            @relation("UserAdmin")
+  // Relations
+  etudiant          Etudiant?         @relation("UserToEtudiant")
+  admin             Admin?            @relation("UserToAdmin")
   votes             Vote[]
   candidates        Candidate[]
-  registrationCode  RegistrationCode? // Relation inverse
+  generatedCodes    RegistrationCode[] @relation("UserGeneratedCodes")
+  usedRegistrationCode RegistrationCode? @relation("UserUsedCode")
   voteTokens        VoteToken[]
-  activityLogs      ActivityLog[]
-  generatedCodes RegistrationCode[]
-  usedCode      RegistrationCode?
+  activityLogs      ActivityLog[]      @relation("UserActivityLogs")
 }
 
 model Etudiant {
@@ -37,17 +37,14 @@ model Etudiant {
   userId          Int?    @unique
   matricule       String? @unique
   codeInscription String? @unique
-
-  
   nom             String?
   prenom          String?
   filiere         String?
   annee           Int?
   photoUrl        String?
 
-  user            User?   @relation("UserEtudiant", fields: [userId], references: [id])
+  user            User?   @relation("UserToEtudiant", fields: [userId], references: [id])
 }
-
 
 model Admin {
   id      Int    @id @default(autoincrement())
@@ -56,7 +53,7 @@ model Admin {
   prenom  String
   poste   String
 
-  user    User   @relation("UserAdmin", fields: [userId], references: [id])
+  user    User   @relation("UserToAdmin", fields: [userId], references: [id])
 }
 
 model Election {
@@ -66,10 +63,11 @@ model Election {
   description String?
   dateDebut   DateTime
   dateFin     DateTime
-  filiere     String?     // Pour les élections par salle
-  annee       Int?        // Pour les élections par salle
-  ecole       String?     // Pour les élections par école
+  filiere     String?
+  annee       Int?
+  ecole       String?
   isActive    Boolean     @default(true)
+  
   candidates  Candidate[]
   votes       Vote[]
   voteTokens  VoteToken[]
@@ -79,10 +77,11 @@ model Candidate {
   id         Int       @id @default(autoincrement())
   nom        String
   prenom     String
-  program  String?
+  program    String?
   photoUrl   String?
   userId     Int
   electionId Int
+  
   election   Election  @relation(fields: [electionId], references: [id])
   user       User      @relation(fields: [userId], references: [id])
   votes      Vote[]
@@ -107,14 +106,13 @@ model RegistrationCode {
   code        String   @unique
   isUsed      Boolean  @default(false)
   createdAt   DateTime @default(now())
-  generatedBy Int      // L'admin qui a généré le code
-  
-  // Relations
-  generatedByUser User @relation(fields: [generatedBy], references: [id])
-  usedByUser     User? @relation(fields: [usedById], references: [id])
-  usedById      Int?   @unique
-}
+  generatedBy Int?
+  usedById    Int?     @unique
 
+  // Relations avec noms explicites
+  generatedByUser User? @relation("UserGeneratedCodes", fields: [generatedBy], references: [id])
+  usedByUser     User?  @relation("UserUsedCode", fields: [usedById], references: [id])
+}
 
 model VoteToken {
   id          Int       @id @default(autoincrement())
@@ -134,15 +132,13 @@ model VoteToken {
 
 model ActivityLog {
   id        Int      @id @default(autoincrement())
-  action    String   // Ex: "USER_LOGIN", "CODE_GENERATION"
-  details   String?  // Description détaillée
-  userId    Int?     // ID de l'utilisateur associé (optionnel)
-  createdAt DateTime @default(now()) // Date de création
+  action    String
+  details   String?
+  userId    Int?
+  createdAt DateTime @default(now())
 
-  // Relation optionnelle (si vous avez un modèle User)
-  user      User?    @relation(fields: [userId], references: [id])
+  user      User?    @relation("UserActivityLogs", fields: [userId], references: [id])
 }
-
 
 enum Role {
   ETUDIANT

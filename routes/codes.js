@@ -12,21 +12,30 @@ const CODE_EXPIRATION_DAYS = 30;
  */
 router.post('/generate', authenticateToken, async (req, res) => {
     try {
+        // Vérification du rôle admin
+        if (req.user.role !== 'ADMIN') {
+            return res.status(403).json({
+                success: false,
+                message: 'Seuls les administrateurs peuvent générer des codes'
+            });
+        }
+
         const { quantity } = req.body;
 
-        if (!quantity || isNaN(quantity) || quantity < 1 || quantity > 1000) {
+        // Validation
+        if (!quantity || isNaN(quantity) || quantity < 1 || quantity > 100) {
             return res.status(400).json({
                 success: false,
-                message: `La quantité doit être entre 1 et 1000`
+                message: 'La quantité doit être entre 1 et 100'
             });
         }
 
         const codes = [];
-        for (let i = 0; i < quantity; i++) {
-            const code = 'UCAO-' + 
-                Math.random().toString(36).substring(2, 6).toUpperCase() + '-' +
-                Math.random().toString(36).substring(2, 6).toUpperCase();
+        const batchId = `BATCH-${Date.now()}`;
 
+        for (let i = 0; i < quantity; i++) {
+            const code = generateRandomCode();
+            
             await prisma.registrationCode.create({
                 data: {
                     code,
@@ -37,8 +46,19 @@ router.post('/generate', authenticateToken, async (req, res) => {
             codes.push(code);
         }
 
+        // Journalisation de l'activité
+        await prisma.activityLog.create({
+            data: {
+                action: 'CODE_GENERATION',
+                details: `Génération de ${quantity} codes par l'admin ${req.user.email}`,
+                userId: req.user.id
+            }
+        });
+
         res.json({
             success: true,
+            batchId,
+            count: codes.length,
             codes
         });
 
@@ -46,10 +66,16 @@ router.post('/generate', authenticateToken, async (req, res) => {
         console.error("Erreur génération codes:", err);
         res.status(500).json({
             success: false,
-            message: "Erreur lors de la génération des codes"
+            message: err.message || "Erreur lors de la génération des codes"
         });
     }
 });
+
+function generateRandomCode() {
+    return 'UCAO-' + 
+        Math.random().toString(36).substring(2, 6).toUpperCase() + '-' +
+        Math.random().toString(36).substring(2, 6).toUpperCase();
+}
 
 /**
  * GET /code/codes
