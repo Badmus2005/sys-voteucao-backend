@@ -85,6 +85,4 @@ router.post('/image', authenticateToken, async (req, res) => {
   }
 });
 
-
-
 export default router;
