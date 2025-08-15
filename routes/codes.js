@@ -14,41 +14,36 @@ router.post('/generate', authenticateToken, async (req, res) => {
     try {
         const { quantity } = req.body;
 
-        // Validation manuelle
-        if (!quantity || isNaN(quantity) || quantity < 1 || quantity > MAX_CODES_PER_REQUEST) {
+        if (!quantity || isNaN(quantity) || quantity < 1 || quantity > 1000) {
             return res.status(400).json({
                 success: false,
-                message: `Le nombre de codes doit être un entier entre 1 et ${MAX_CODES_PER_REQUEST}`
+                message: `La quantité doit être entre 1 et 1000`
             });
         }
 
-        const batchId = `BATCH-${Date.now()}`;
-        const expiresAt = new Date(Date.now() + CODE_EXPIRATION_DAYS * 24 * 60 * 60 * 1000);
-
-        // Génération des codes
         const codes = [];
         for (let i = 0; i < quantity; i++) {
-            const code = await generateUniqueCode();
-            const created = await prisma.registrationCode.create({
+            const code = 'UCAO-' + 
+                Math.random().toString(36).substring(2, 6).toUpperCase() + '-' +
+                Math.random().toString(36).substring(2, 6).toUpperCase();
+
+            await prisma.registrationCode.create({
                 data: {
                     code,
-                    batchId,
                     generatedBy: req.user.id,
-                    expiresAt,
+                    isUsed: false
                 }
             });
-            codes.push(created.code);
+            codes.push(code);
         }
 
         res.json({
             success: true,
-            count: codes.length,
-            batchId,
             codes
         });
 
     } catch (err) {
-        console.error("Erreur code/generate:", err);
+        console.error("Erreur génération codes:", err);
         res.status(500).json({
             success: false,
             message: "Erreur lors de la génération des codes"

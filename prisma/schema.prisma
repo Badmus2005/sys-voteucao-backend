@@ -103,10 +103,11 @@ model RegistrationCode {
   id          Int      @id @default(autoincrement())
   code        String   @unique
   isUsed      Boolean  @default(false)
-  usedById    Int?     @unique
   createdAt   DateTime @default(now())
-
-  user        User?    @relation(fields: [usedById], references: [id])
+  generatedBy Int?     // L'utilisateur qui a généré le code
+  
+  // Relations
+  user        User?    @relation(fields: [generatedBy], references: [id])
 }
 
 model VoteToken {
