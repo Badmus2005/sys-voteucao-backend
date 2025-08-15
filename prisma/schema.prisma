@@ -13,11 +13,12 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+
 model User {
   id                Int               @id @default(autoincrement())
   email             String            @unique
   password          String
-  role              Role
+  role              Role              @default(ADMIN)
   createdAt         DateTime          @default(now())
 
   etudiant          Etudiant?         @relation("UserEtudiant")
@@ -27,6 +28,8 @@ model User {
   registrationCode  RegistrationCode? // Relation inverse
   voteTokens        VoteToken[]
   activityLogs      ActivityLog[]
+  generatedCodes RegistrationCode[]
+  usedCode      RegistrationCode?
 }
 
 model Etudiant {
@@ -104,11 +107,14 @@ model RegistrationCode {
   code        String   @unique
   isUsed      Boolean  @default(false)
   createdAt   DateTime @default(now())
-  generatedBy Int?     // L'utilisateur qui a généré le code
+  generatedBy Int      // L'admin qui a généré le code
   
   // Relations
-  user        User?    @relation(fields: [generatedBy], references: [id])
+  generatedByUser User @relation(fields: [generatedBy], references: [id])
+  usedByUser     User? @relation(fields: [usedById], references: [id])
+  usedById      Int?   @unique
 }
+
 
 model VoteToken {
   id          Int       @id @default(autoincrement())
