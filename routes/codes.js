@@ -10,7 +10,7 @@ const CODE_EXPIRATION_DAYS = 30;
  * POST /code/generate
  * Génère des codes d'inscription uniques
  */
-router.post('codes/generate', authenticateToken, async (req, res) => {
+router.post('/generate', authenticateToken, async (req, res) => {
     try {
         const { quantity } = req.body;
 
