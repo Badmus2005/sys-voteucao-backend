@@ -1,0 +1,149 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                Int               @id @default(autoincrement())
+  email             String            @unique
+  password          String
+  role              Role
+  createdAt         DateTime          @default(now())
+
+  etudiant          Etudiant?         @relation("UserEtudiant")
+  admin             Admin?            @relation("UserAdmin")
+  votes             Vote[]
+  candidates        Candidate[]
+  registrationCode  RegistrationCode? // Relation inverse
+  voteTokens        VoteToken[]
+  activityLogs      ActivityLog[]
+}
+
+model Etudiant {
+  id              Int     @id @default(autoincrement())
+  userId          Int?    @unique
+  matricule       String? @unique
+  codeInscription String? @unique
+
+  
+  nom             String?
+  prenom          String?
+  filiere         String?
+  annee           Int?
+  photoUrl        String?
+
+  user            User?   @relation("UserEtudiant", fields: [userId], references: [id])
+}
+
+
+model Admin {
+  id      Int    @id @default(autoincrement())
+  userId  Int    @unique
+  nom     String
+  prenom  String
+  poste   String
+
+  user    User   @relation("UserAdmin", fields: [userId], references: [id])
+}
+
+model Election {
+  id          Int         @id @default(autoincrement())
+  type        ElectionType
+  titre       String
+  description String?
+  dateDebut   DateTime
+  dateFin     DateTime
+  filiere     String?     // Pour les élections par salle
+  annee       Int?        // Pour les élections par salle
+  ecole       String?     // Pour les élections par école
+  isActive    Boolean     @default(true)
+  candidates  Candidate[]
+  votes       Vote[]
+  voteTokens  VoteToken[]
+}
+
+model Candidate {
+  id         Int       @id @default(autoincrement())
+  nom        String
+  prenom     String
+  program  String?
+  photoUrl   String?
+  userId     Int
+  electionId Int
+  election   Election  @relation(fields: [electionId], references: [id])
+  user       User      @relation(fields: [userId], references: [id])
+  votes      Vote[]
+}
+
+model Vote {
+  id          Int       @id @default(autoincrement())
+  userId      Int
+  electionId  Int
+  candidateId Int
+  createdAt   DateTime  @default(now())
+
+  user        User      @relation(fields: [userId], references: [id])
+  election    Election  @relation(fields: [electionId], references: [id])
+  candidate   Candidate @relation(fields: [candidateId], references: [id])
+
+  @@unique([userId, electionId])
+}
+
+model RegistrationCode {
+  id          Int      @id @default(autoincrement())
+  code        String   @unique
+  isUsed      Boolean  @default(false)
+  usedById    Int?     @unique
+  createdAt   DateTime @default(now())
+
+  user        User?    @relation(fields: [usedById], references: [id])
+}
+
+model VoteToken {
+  id          Int       @id @default(autoincrement())
+  token       String    @unique
+  userId      Int
+  electionId  Int
+  isUsed      Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  expiresAt   DateTime
+  usedAt      DateTime?
+
+  user        User      @relation(fields: [userId], references: [id])
+  election    Election  @relation(fields: [electionId], references: [id])
+
+  @@unique([userId, electionId])
+}
+
+model ActivityLog {
+  id        Int      @id @default(autoincrement())
+  action    String   // Ex: "USER_LOGIN", "CODE_GENERATION"
+  details   String?  // Description détaillée
+  userId    Int?     // ID de l'utilisateur associé (optionnel)
+  createdAt DateTime @default(now()) // Date de création
+
+  // Relation optionnelle (si vous avez un modèle User)
+  user      User?    @relation(fields: [userId], references: [id])
+}
+
+
+enum Role {
+  ETUDIANT
+  ADMIN
+}
+
+enum ElectionType {
+  SALLE
+  ECOLE
+  UNIVERSITE
+}
