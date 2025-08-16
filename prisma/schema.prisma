@@ -52,6 +52,7 @@ model Admin {
   nom     String
   prenom  String
   poste   String
+  email   String
 
   user    User   @relation("UserToAdmin", fields: [userId], references: [id])
 }

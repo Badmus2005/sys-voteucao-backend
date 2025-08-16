@@ -39,11 +39,11 @@ router.get('/me', authenticateToken, async (req, res) => {
  */
 router.put('/update', authenticateToken, async (req, res) => {
     try {
-        const { nom, prenom, poste } = req.body;
+        const { nom, prenom, email } = req.body;
 
         const updatedAdmin = await prisma.admin.update({
             where: { userId: req.user.id },
-            data: { nom, prenom, poste },
+            data: { nom, prenom, email },
             include: { user: true }
         });
 
