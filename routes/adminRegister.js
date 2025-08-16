@@ -34,6 +34,7 @@ router.post('/', async (req, res) => {
                         nom,
                         prenom,
                         poste: poste || '',
+                        email,
                     },
                 },
             },
