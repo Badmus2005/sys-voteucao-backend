@@ -89,10 +89,10 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
       });
     }
 
-    if (anneeInt < 1 || anneeInt > 5) {
+    if (anneeInt < 1 || anneeInt > 3) {
       return res.status(400).json({ 
         success: false,
-        message: "L'année doit être entre 1 et 5." 
+        message: "L'année doit être entre 1 et 3." 
       });
     }
 
