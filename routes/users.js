@@ -1,39 +1,75 @@
+import axios from 'axios';
+import FormData from 'form-data';
 import express from 'express';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
+import bcrypt from 'bcrypt';
 import prisma from '../prisma.js';
 import { authenticateToken } from '../middlewares/auth.js';
 
 const router = express.Router();
+// Configuration ImgBB
+ const IMGBB_UPLOAD_URL = 'https://api.imgbb.com/1/upload';
+// Configuration de Multer pour les avatars
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = 'public/uploads/avatars';
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname);
+    cb(null, `avatar-${req.user.id}-${Date.now()}${ext}`);
+  }
+});
 
-// Récupérer le profil utilisateur (étudiant ou admin)
+const upload = multer({
+  dest: '/tmp/uploads',  // Utilisez /tmp pour le stockage temporaire (éphémère sur Railways)
+  limits: { fileSize: 2 * 1024 * 1024 }, // 2MB
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/gif'];
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Type de fichier non supporté (JPEG, PNG, GIF uniquement)'));
+    }
+  }
+});
+
+// Récupérer le profil étudiant
 router.get('/profile', authenticateToken, async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
-      include: {
-        etudiant: true,
-        admin: true
-      }
+      select: { role: true }
     });
 
-    if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    if (!user || user.role !== 'ETUDIANT') {
+      return res.status(403).json({ message: 'Accès réservé aux étudiants' });
+    }
+
+    const etudiant = await prisma.etudiant.findUnique({
+      where: { userId: req.user.id },
+      include: { user: true }
+    });
+
+    if (!etudiant) {
+      return res.status(404).json({ message: 'Profil étudiant non trouvé' });
+    }
 
     const profileData = {
-      id: user.id,
-      email: user.email,
-      role: user.role,
-      etudiant: user.etudiant ? {
-        matricule: user.etudiant.matricule,
-        nom: user.etudiant.nom,
-        prenom: user.etudiant.prenom,
-        filiere: user.etudiant.filiere,
-        annee: user.etudiant.annee,
-        photoUrl: user.etudiant.photoUrl
-      } : null,
-      admin: user.admin ? {
-        nom: user.admin.nom,
-        prenom: user.admin.prenom,
-        poste: user.admin.poste
-      } : null
+      id: etudiant.userId,
+      email: etudiant.user.email,
+      role: etudiant.user.role,
+      matricule: etudiant.matricule,
+      nom: etudiant.nom,
+      prenom: etudiant.prenom,
+      filiere: etudiant.filiere,
+      annee: etudiant.annee,
+      photoUrl: etudiant.photoUrl
     };
 
     res.json(profileData);
@@ -43,153 +79,157 @@ router.get('/profile', authenticateToken, async (req, res) => {
   }
 });
 
-// Mettre à jour le profil utilisateur (étudiant ou admin)
+// Mettre à jour le profil étudiant
 router.put('/profile', authenticateToken, async (req, res) => {
   try {
-    const { email, nom, prenom, filiere, annee, poste } = req.body;
+    const { email, nom, prenom, filiere, annee } = req.body;
 
     const user = await prisma.user.findUnique({
       where: { id: req.user.id },
-      include: { etudiant: true, admin: true }
+      select: { role: true, email: true }
     });
 
-    if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    if (!user || user.role !== 'ETUDIANT') {
+      return res.status(403).json({ message: 'Accès réservé aux étudiants' });
+    }
 
-    // Mettre à jour l'email si fourni et différent
     if (email && email !== user.email) {
       const existing = await prisma.user.findUnique({ where: { email } });
-      if (existing && existing.id !== user.id) {
+      if (existing) {
         return res.status(400).json({ message: 'Email déjà utilisé' });
       }
-      await prisma.user.update({ where: { id: user.id }, data: { email } });
-    }
-
-    // Étudiant
-    if (user.role === 'ETUDIANT' && user.etudiant) {
-      const updatedStudent = await prisma.etudiant.update({
-        where: { userId: user.id },
-        data: {
-          ...(nom ? { nom } : {}),
-          ...(prenom ? { prenom } : {}),
-          ...(filiere ? { filiere } : {}),
-          ...(annee ? { annee: parseInt(annee) } : {})
-        }
+      await prisma.user.update({
+        where: { id: req.user.id },
+        data: { email }
       });
-      return res.json({ message: 'Profil étudiant mis à jour', etudiant: updatedStudent });
     }
 
-    // Admin
-    if (user.role === 'ADMIN' && user.admin) {
-      const updatedAdmin = await prisma.admin.update({
-        where: { userId: user.id },
-        data: {
-          ...(nom ? { nom } : {}),
-          ...(prenom ? { prenom } : {}),
-          ...(poste ? { poste } : {})
-        }
-      });
-      return res.json({ message: 'Profil admin mis à jour', admin: updatedAdmin });
-    }
+    const updatedEtudiant = await prisma.etudiant.update({
+      where: { userId: req.user.id },
+      data: {
+        nom: nom || undefined,
+        prenom: prenom || undefined,
+        filiere: filiere || undefined,
+        annee: annee ? parseInt(annee) : undefined
+      }
+    });
 
-    res.status(400).json({ message: 'Impossible de mettre à jour le profil' });
+    res.json({
+      message: 'Profil mis à jour avec succès',
+      profile: {
+        email: email || user.email,
+        ...updatedEtudiant
+      }
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Erreur serveur' });
   }
 });
 
-// Élections éligibles pour l'utilisateur
-router.get('/elections', authenticateToken, async (req, res) => {
+router.post('/avatar', authenticateToken, upload.single('avatar'), async (req, res) => {
   try {
-    const userId = req.user.id;
+    if (!req.file) {
+      return res.status(400).json({ message: 'Aucun fichier téléchargé' });
+    }
 
-    const tokens = await prisma.voteToken.findMany({
-      where: {
-        userId,
-        isUsed: false,
-        expiresAt: { gt: new Date() },
-        election: { isActive: true }
-      },
-      include: {
-        election: {
-          include: {
-            candidates: {
-              include: { user: { include: { etudiant: true } } }
-            },
-            _count: { select: { votes: true } }
-          }
-        }
-      },
-      orderBy: { createdAt: 'desc' }
+    // Créer un FormData pour ImgBB
+    const formData = new FormData();
+    formData.append('image', fs.createReadStream(req.file.path));
+
+    // Envoyer à ImgBB
+    const response = await axios.post(
+      `${IMGBB_UPLOAD_URL}?key=${process.env.IMGBB_API_KEY}`,
+      formData,
+      { headers: formData.getHeaders(),
+        timeout: 10000
+       }
+    );
+
+    // Supprimer le fichier temporaire après upload
+    fs.unlinkSync(req.file.path);
+
+    if (!response.data.success) {
+      throw new Error('Échec de l\'upload vers ImgBB');
+    }
+
+    // Mettre à jour l'URL dans la base de données
+    const imgbbUrl = response.data.data.url;
+    await prisma.etudiant.update({
+      where: { userId: req.user.id },
+      data: { photoUrl: imgbbUrl }
     });
 
-    const elections = tokens.map(t => {
-      const hasVoted = t.election.votes.some(v => v.userId === userId);
-      return {
-        ...t.election,
-        hasVoted,
-        candidates: t.election.candidates.map(c => ({
-          id: c.id,
-          nom: c.nom,
-          prenom: c.prenom,
-          photoUrl: c.photoUrl
-        }))
-      };
+    res.json({ 
+      success: true,
+      photoUrl: imgbbUrl,
+      message: 'Avatar mis à jour avec succès'
     });
 
-    res.json(elections);
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Erreur serveur' });
+    console.error('Erreur upload avatar:', error);
+    // Nettoyage du fichier temporaire en cas d'erreur
+    if (req.file?.path && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    res.status(500).json({
+      message: error.response?.data?.error?.message || 'Erreur lors de l\'upload'
+    });
   }
 });
 
-// Fil d'actualité: dernières élections clôturées
-router.get('/feed', authenticateToken, async (req, res) => {
+// Changer le mot de passe
+router.post('/change-password', authenticateToken, async (req, res) => {
   try {
-    const closedElections = await prisma.election.findMany({
-      where: { isActive: false },
-      orderBy: { dateFin: 'desc' },
-      take: 10,
-      include: { candidates: true, _count: { select: { votes: true } } }
+    const { currentPassword, newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ message: 'Tous les champs sont requis' });
+    }
+
+    if (newPassword.length < 8) {
+      return res.status(400).json({ message: 'Le mot de passe doit contenir au moins 8 caractères' });
+    }
+
+    // Vérifier l'utilisateur
+    const user = await prisma.user.findUnique({ 
+      where: { id: req.user.id },
+      select: { password: true }
     });
 
-    const feed = await Promise.all(closedElections.map(async (e) => {
-      const votesGrouped = await prisma.vote.groupBy({
-        by: ['candidateId'],
-        where: { electionId: e.id },
-        _count: { candidateId: true }
-      });
+    if (!user) {
+      return res.status(404).json({ message: 'Utilisateur non trouvé' });
+    }
 
-      const candidatesWithVotes = e.candidates.map(c => {
-        const votesCount = votesGrouped.find(v => v.candidateId === c.id)?._count.candidateId || 0;
-        return { ...c, votesCount };
-      });
+    // Vérifier l'ancien mot de passe
+    const validPassword = await bcrypt.compare(currentPassword, user.password);
+    if (!validPassword) {
+      return res.status(401).json({ message: 'Mot de passe actuel incorrect' });
+    }
 
-      candidatesWithVotes.sort((a, b) => b.votesCount - a.votesCount);
-      const winner = candidatesWithVotes[0] || null;
+    // Hacher et mettre à jour le mot de passe
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
 
-      return {
-        id: e.id,
-        titre: e.titre,
-        type: e.type,
-        dateFin: e.dateFin,
-        totalVotes: e._count.votes,
-        winner: winner ? {
-          id: winner.id,
-          nom: winner.nom,
-          prenom: winner.prenom,
-          votes: winner.votesCount,
-          photoUrl: winner.photoUrl
-        } : null
-      };
-    }));
+    await prisma.user.update({
+      where: { id: req.user.id },
+      data: { password: hashedPassword }
+    });
 
-    res.json(feed);
+    res.json({ 
+      success: true,
+      message: 'Mot de passe changé avec succès'
+    });
+
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Erreur serveur' });
+    console.error('Erreur changement mot de passe:', error);
+    res.status(500).json({ 
+      message: 'Erreur lors du changement de mot de passe' 
+    });
   }
 });
+
+// Routes existantes pour les élections...
+// (Conservez ici vos routes existantes pour /elections et /feed)
 
 export default router;
