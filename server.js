@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import prisma from './prisma.js'; // ← Ajouter cette importation
 
 // Import des routes
 import activityRouter from './routes/activity.js';
@@ -35,8 +36,15 @@ app.use(cors({
     credentials: true
 }));
 
+// Middlewares de base
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-router.get('api/health', async (req, res) => {
+// Dossier statique pour les uploads
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// ==================== ROUTE HEALTH CHECK ====================
+app.get('/api/health', async (req, res) => {
     try {
         // Vérifier la connexion à la base de données
         await prisma.$queryRaw`SELECT 1`;
@@ -59,14 +67,7 @@ router.get('api/health', async (req, res) => {
         });
     }
 });
-
-
-// Middlewares de base
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-// Dossier statique pour les uploads
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// ============================================================
 
 // Routes API avec préfixe /api
 app.use('/api/adminRegister', adminRegisterRouter);
