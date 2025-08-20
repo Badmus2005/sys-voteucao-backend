@@ -3,7 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import prisma from './prisma.js'; // ← Ajouter cette importation
+import prisma from './prisma.js';
 
 // Import des routes
 import activityRouter from './routes/activity.js';
@@ -44,28 +44,12 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ==================== ROUTE HEALTH CHECK ====================
-app.get('/api/health', async (req, res) => {
-    try {
-        // Vérifier la connexion à la base de données
-        await prisma.$queryRaw`SELECT 1`;
-
-        res.status(200).json({
-            status: 'OK',
-            message: 'All systems operational',
-            database: 'Connected',
-            uptime: process.uptime(),
-            timestamp: new Date().toISOString(),
-            environment: process.env.NODE_ENV
-        });
-    } catch (error) {
-        res.status(500).json({
-            status: 'ERROR',
-            message: 'Service unavailable',
-            database: 'Disconnected',
-            error: error.message,
-            timestamp: new Date().toISOString()
-        });
-    }
+app.get('/api/health', (req, res) => {
+    res.status(200).json({
+        status: 'OK',
+        message: 'Service is healthy',
+        timestamp: new Date().toISOString()
+    });
 });
 // ============================================================
 
