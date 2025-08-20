@@ -34,6 +34,10 @@ app.use(cors({
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true
 }));
+app.get('/api/health', (req, res) => {
+    res.status(200).send('OK');
+});
+
 
 // Middlewares de base
 app.use(express.json({ limit: '10mb' }));
@@ -60,7 +64,7 @@ app.use('/api/activity', activityRouter);
 
 // Route de test
 app.get('/api/test', (req, res) => {
-    res.json({ 
+    res.json({
         message: '🚀 API Vote UCAO opérationnelle',
         version: '2.0.0',
         timestamp: new Date().toISOString(),
@@ -79,7 +83,7 @@ app.get('/api/health', (req, res) => {
 
 // Gestion des routes non trouvées
 app.use('/api/*', (req, res) => {
-    res.status(404).json({ 
+    res.status(404).json({
         message: 'Route API non trouvée',
         path: req.originalUrl
     });
@@ -88,10 +92,10 @@ app.use('/api/*', (req, res) => {
 // Middleware de gestion d'erreurs global
 app.use((err, req, res, next) => {
     console.error('💥 Erreur serveur:', err);
-    
+
     res.status(err.status || 500).json({
-        message: process.env.NODE_ENV === 'production' 
-            ? 'Erreur interne du serveur' 
+        message: process.env.NODE_ENV === 'production'
+            ? 'Erreur interne du serveur'
             : err.message
     });
 });
