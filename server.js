@@ -34,8 +34,30 @@ app.use(cors({
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true
 }));
-app.get('/api/health', (req, res) => {
-    res.status(200).send('OK');
+
+
+router.get('api/health', async (req, res) => {
+    try {
+        // Vérifier la connexion à la base de données
+        await prisma.$queryRaw`SELECT 1`;
+
+        res.status(200).json({
+            status: 'OK',
+            message: 'All systems operational',
+            database: 'Connected',
+            uptime: process.uptime(),
+            timestamp: new Date().toISOString(),
+            environment: process.env.NODE_ENV
+        });
+    } catch (error) {
+        res.status(500).json({
+            status: 'ERROR',
+            message: 'Service unavailable',
+            database: 'Disconnected',
+            error: error.message,
+            timestamp: new Date().toISOString()
+        });
+    }
 });
 
 
@@ -69,15 +91,6 @@ app.get('/api/test', (req, res) => {
         version: '2.0.0',
         timestamp: new Date().toISOString(),
         environment: process.env.NODE_ENV || 'development'
-    });
-});
-
-// Route de santé pour le déploiement
-app.get('/api/health', (req, res) => {
-    res.status(200).json({
-        status: 'OK',
-        uptime: process.uptime(),
-        timestamp: new Date().toISOString()
     });
 });
 
