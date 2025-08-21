@@ -10,7 +10,7 @@ import { authenticateToken } from '../middlewares/auth.js';
 
 const router = express.Router();
 // Configuration ImgBB
- const IMGBB_UPLOAD_URL = 'https://api.imgbb.com/1/upload';
+const IMGBB_UPLOAD_URL = 'https://api.imgbb.com/1/upload';
 // Configuration de Multer pour les avatars
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -141,9 +141,10 @@ router.post('/avatar', authenticateToken, upload.single('avatar'), async (req, r
     const response = await axios.post(
       `${IMGBB_UPLOAD_URL}?key=${process.env.IMGBB_API_KEY}`,
       formData,
-      { headers: formData.getHeaders(),
+      {
+        headers: formData.getHeaders(),
         timeout: 10000
-       }
+      }
     );
 
     // Supprimer le fichier temporaire après upload
@@ -160,7 +161,7 @@ router.post('/avatar', authenticateToken, upload.single('avatar'), async (req, r
       data: { photoUrl: imgbbUrl }
     });
 
-    res.json({ 
+    res.json({
       success: true,
       photoUrl: imgbbUrl,
       message: 'Avatar mis à jour avec succès'
@@ -192,7 +193,7 @@ router.post('/change-password', authenticateToken, async (req, res) => {
     }
 
     // Vérifier l'utilisateur
-    const user = await prisma.user.findUnique({ 
+    const user = await prisma.user.findUnique({
       where: { id: req.user.id },
       select: { password: true }
     });
@@ -216,20 +217,19 @@ router.post('/change-password', authenticateToken, async (req, res) => {
       data: { password: hashedPassword }
     });
 
-    res.json({ 
+    res.json({
       success: true,
       message: 'Mot de passe changé avec succès'
     });
 
   } catch (error) {
     console.error('Erreur changement mot de passe:', error);
-    res.status(500).json({ 
-      message: 'Erreur lors du changement de mot de passe' 
+    res.status(500).json({
+      message: 'Erreur lors du changement de mot de passe'
     });
   }
 });
 
-// Routes existantes pour les élections...
-// (Conservez ici vos routes existantes pour /elections et /feed)
+
 
 export default router;

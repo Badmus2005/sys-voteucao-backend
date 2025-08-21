@@ -4,6 +4,90 @@ import { authenticateToken } from '../middlewares/auth.js';
 
 const router = express.Router();
 
+// POST /api/candidats - Ajouter un candidat (Admin seulement)
+router.post('/', authenticateToken, async (req, res) => {
+    try {
+        // Vérifier que l'utilisateur est admin
+        const user = await prisma.user.findUnique({
+            where: { id: req.user.id },
+            include: { admin: true }
+        });
+
+        if (!user || user.role !== 'ADMIN') {
+            return res.status(403).json({ message: 'Accès refusé' });
+        }
+
+        const { nom, prenom, userId, electionId, programme, photoUrl } = req.body;
+
+        if (!nom || !prenom || !userId || !electionId) {
+            return res.status(400).json({ message: 'Champs requis manquants' });
+        }
+
+        // Vérifications existantes...
+        const candidate = await prisma.candidate.create({
+            data: {
+                nom,
+                prenom,
+                programme: programme || null,
+                photoUrl: photoUrl || null,
+                userId: parseInt(userId),
+                electionId: parseInt(electionId)
+            },
+            include: {
+                user: {
+                    include: {
+                        etudiant: true
+                    }
+                },
+                election: true
+            }
+        });
+
+        res.status(201).json(candidate);
+
+    } catch (error) {
+        console.error('Error creating candidate:', error);
+        res.status(500).json({ message: 'Erreur serveur' });
+    }
+});
+
+// GET /api/candidats/:id - Récupérer un candidat spécifique
+router.get('/:id', async (req, res) => {
+    try {
+        const candidateId = parseInt(req.params.id);
+
+        if (isNaN(candidateId)) {
+            return res.status(400).json({ message: 'ID de candidat invalide' });
+        }
+
+        const candidate = await prisma.candidate.findUnique({
+            where: { id: candidateId },
+            include: {
+                user: {
+                    include: {
+                        etudiant: true
+                    }
+                },
+                election: true,
+                _count: {
+                    select: {
+                        votes: true
+                    }
+                }
+            }
+        });
+
+        if (!candidate) {
+            return res.status(404).json({ message: 'Candidat non trouvé' });
+        }
+
+        res.json(candidate);
+
+    } catch (error) {
+        console.error('Error fetching candidate:', error);
+        res.status(500).json({ message: 'Erreur serveur' });
+    }
+});
 
 // Déposer une candidature à une élection
 router.post('/candidature', authenticateToken, async (req, res) => {
@@ -64,62 +148,142 @@ router.put('/:candidateId/programme', authenticateToken, async (req, res) => {
     }
 });
 
-// Liste des candidats par élection
-router.get('/:electionId', async (req, res) => {
+
+// GET /api/candidats - Liste des candidats (avec filtre optionnel par electionId)
+router.get('/', async (req, res) => {
     try {
-        const electionId = parseInt(req.params.electionId);
-        if (isNaN(electionId)) {
-            return res.status(400).json({ message: 'ElectionId invalide' });
+        const { electionId, page = 1, limit = 10 } = req.query;
+
+        // Construction de la clause WHERE
+        const whereClause = {};
+        if (electionId) {
+            whereClause.electionId = parseInt(electionId);
         }
 
-        const candidates = await prisma.candidate.findMany({
-            where: { electionId }
-        });
+        // Pagination
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+        const take = parseInt(limit);
 
-        res.json(candidates);
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Erreur serveur' });
-    }
-});
+        const [candidates, total] = await Promise.all([
+            prisma.candidate.findMany({
+                where: whereClause,
+                include: {
+                    user: {
+                        include: {
+                            etudiant: true
+                        }
+                    },
+                    election: true,
+                    _count: {
+                        select: {
+                            votes: true
+                        }
+                    }
+                },
+                orderBy: {
+                    nom: 'asc'
+                },
+                skip,
+                take
+            }),
+            prisma.candidate.count({ where: whereClause })
+        ]);
 
-// Ajouter un candidat à une élection
-router.post('/', async (req, res) => {
-    try {
-        const { nom, prenom, userId, electionId, programme, photoUrl } = req.body;
+        const totalPages = Math.ceil(total / parseInt(limit));
 
-        if (!nom || !prenom || !userId || !electionId) {
-            return res.status(400).json({ message: 'Champs requis manquants' });
-        }
-
-        // Vérifier que userId existe dans User (optionnel, mais recommandé)
-        const userExists = await prisma.user.findUnique({ where: { id: userId } });
-        if (!userExists) {
-            return res.status(400).json({ message: 'Utilisateur inexistant' });
-        }
-
-        // Vérifier que electionId existe dans Election
-        const electionExists = await prisma.election.findUnique({ where: { id: electionId } });
-        if (!electionExists) {
-            return res.status(400).json({ message: 'Élection inexistante' });
-        }
-
-        const candidate = await prisma.candidate.create({
-            data: {
-                nom,
-                prenom,
-                programme: programme || null,
-                photoUrl: photoUrl || null,
-                userId,
-                electionId
+        res.json({
+            candidates,
+            pagination: {
+                currentPage: parseInt(page),
+                totalPages,
+                totalCandidates: total,
+                hasNext: parseInt(page) < totalPages,
+                hasPrev: parseInt(page) > 1
             }
         });
 
-        res.status(201).json(candidate);
     } catch (error) {
-        console.error(error);
+        console.error('Error fetching candidates:', error);
         res.status(500).json({ message: 'Erreur serveur' });
     }
 });
+
+// PUT /api/candidats/:id - Modifier un candidat (Admin seulement)
+router.put('/:id', authenticateToken, async (req, res) => {
+    try {
+        // Vérifier que l'utilisateur est admin
+        const user = await prisma.user.findUnique({
+            where: { id: req.user.id },
+            include: { admin: true }
+        });
+
+        if (!user || user.role !== 'ADMIN') {
+            return res.status(403).json({ message: 'Accès refusé' });
+        }
+
+        const candidateId = parseInt(req.params.id);
+        const { nom, prenom, programme, photoUrl } = req.body;
+
+        if (isNaN(candidateId)) {
+            return res.status(400).json({ message: 'ID de candidat invalide' });
+        }
+
+        const candidate = await prisma.candidate.update({
+            where: { id: candidateId },
+            data: {
+                ...(nom && { nom }),
+                ...(prenom && { prenom }),
+                ...(programme !== undefined && { programme }),
+                ...(photoUrl !== undefined && { photoUrl })
+            },
+            include: {
+                user: {
+                    include: {
+                        etudiant: true
+                    }
+                },
+                election: true
+            }
+        });
+
+        res.json({ message: 'Candidat mis à jour avec succès', candidate });
+
+    } catch (error) {
+        console.error('Error updating candidate:', error);
+        res.status(500).json({ message: 'Erreur serveur' });
+    }
+});
+
+// DELETE /api/candidats/:id - Supprimer un candidat (Admin seulement)
+router.delete('/:id', authenticateToken, async (req, res) => {
+    try {
+        // Vérifier que l'utilisateur est admin
+        const user = await prisma.user.findUnique({
+            where: { id: req.user.id },
+            include: { admin: true }
+        });
+
+        if (!user || user.role !== 'ADMIN') {
+            return res.status(403).json({ message: 'Accès refusé' });
+        }
+
+        const candidateId = parseInt(req.params.id);
+
+        if (isNaN(candidateId)) {
+            return res.status(400).json({ message: 'ID de candidat invalide' });
+        }
+
+        await prisma.candidate.delete({
+            where: { id: candidateId }
+        });
+
+        res.json({ message: 'Candidat supprimé avec succès' });
+
+    } catch (error) {
+        console.error('Error deleting candidate:', error);
+        res.status(500).json({ message: 'Erreur serveur' });
+    }
+});
+
 
 export default router;

@@ -289,4 +289,237 @@ async function generateVoteTokensForElection(election) {
     }
 }
 
+
+// GET /api/election/by-type/:type - Récupérer les élections par type avec filtres
+router.get('/by-type/:type', async (req, res) => {
+    try {
+        const { type } = req.params;
+        const { filiere, annee, ecole, page = 1, limit = 10, status = 'active' } = req.query;
+
+        // Validation du type d'élection
+        const validTypes = ['SALLE', 'ECOLE', 'UNIVERSITE'];
+        if (!validTypes.includes(type.toUpperCase())) {
+            return res.status(400).json({
+                message: 'Type d\'élection invalide. Types valides: SALLE, ECOLE, UNIVERSITE'
+            });
+        }
+
+        // Construction de la clause WHERE
+        let whereClause = {
+            type: type.toUpperCase()
+        };
+
+        // Filtre par statut
+        if (status === 'active') {
+            whereClause.isActive = true;
+            whereClause.dateDebut = { lte: new Date() };
+            whereClause.dateFin = { gte: new Date() };
+        } else if (status === 'upcoming') {
+            whereClause.isActive = true;
+            whereClause.dateDebut = { gt: new Date() };
+        } else if (status === 'closed') {
+            whereClause.isActive = false;
+        }
+
+        // Filtres spécifiques selon le type d'élection
+        if (type.toUpperCase() === 'SALLE') {
+            if (filiere) whereClause.filiere = filiere;
+            if (annee) whereClause.annee = parseInt(annee);
+        } else if (type.toUpperCase() === 'ECOLE') {
+            if (ecole) whereClause.ecole = ecole;
+        }
+
+        // Pagination
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+        const take = parseInt(limit);
+
+        // Récupération des élections avec pagination
+        const [elections, total] = await Promise.all([
+            prisma.election.findMany({
+                where: whereClause,
+                include: {
+                    candidates: {
+                        include: {
+                            user: {
+                                include: {
+                                    etudiant: true
+                                }
+                            }
+                        }
+                    },
+                    _count: {
+                        select: {
+                            votes: true,
+                            candidates: true,
+                            voteTokens: true
+                        }
+                    }
+                },
+                orderBy: { dateDebut: 'desc' },
+                skip,
+                take
+            }),
+            prisma.election.count({ where: whereClause })
+        ]);
+
+        // Calcul des statistiques de participation
+        const electionsWithStats = elections.map(election => {
+            const totalVotes = election._count.votes;
+            const totalTokens = election._count.voteTokens;
+            const participationRate = totalTokens > 0
+                ? Math.round((totalVotes / totalTokens) * 100)
+                : 0;
+
+            return {
+                ...election,
+                stats: {
+                    totalVotes,
+                    totalTokens,
+                    participationRate: `${participationRate}%`,
+                    candidatesCount: election._count.candidates
+                }
+            };
+        });
+
+        // Informations de pagination
+        const totalPages = Math.ceil(total / parseInt(limit));
+
+        res.json({
+            elections: electionsWithStats,
+            pagination: {
+                currentPage: parseInt(page),
+                totalPages,
+                totalElections: total,
+                hasNext: parseInt(page) < totalPages,
+                hasPrev: parseInt(page) > 1
+            },
+            filters: {
+                type,
+                filiere,
+                annee,
+                ecole,
+                status
+            }
+        });
+
+    } catch (error) {
+        console.error('Error fetching elections by type:', error);
+        res.status(500).json({
+            message: 'Erreur serveur lors de la récupération des élections',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+});
+
+// GET /api/election/stats/by-type/:type - Statistiques par type d'élection
+router.get('/stats/by-type/:type', async (req, res) => {
+    try {
+        const { type } = req.params;
+        const { filiere, annee, ecole } = req.query;
+
+        // Validation du type
+        const validTypes = ['SALLE', 'ECOLE', 'UNIVERSITE'];
+        if (!validTypes.includes(type.toUpperCase())) {
+            return res.status(400).json({
+                message: 'Type d\'élection invalide'
+            });
+        }
+
+        const whereClause = {
+            type: type.toUpperCase(),
+            ...(type.toUpperCase() === 'SALLE' && {
+                ...(filiere && { filiere }),
+                ...(annee && { annee: parseInt(annee) })
+            }),
+            ...(type.toUpperCase() === 'ECOLE' && {
+                ...(ecole && { ecole })
+            })
+        };
+
+        const [
+            totalElections,
+            activeElections,
+            upcomingElections,
+            closedElections,
+            totalVotes,
+            totalCandidates
+        ] = await Promise.all([
+            // Total des élections
+            prisma.election.count({ where: whereClause }),
+
+            // Élections actives
+            prisma.election.count({
+                where: {
+                    ...whereClause,
+                    isActive: true,
+                    dateDebut: { lte: new Date() },
+                    dateFin: { gte: new Date() }
+                }
+            }),
+
+            // Élections à venir
+            prisma.election.count({
+                where: {
+                    ...whereClause,
+                    isActive: true,
+                    dateDebut: { gt: new Date() }
+                }
+            }),
+
+            // Élections clôturées
+            prisma.election.count({
+                where: {
+                    ...whereClause,
+                    isActive: false
+                }
+            }),
+
+            // Total des votes
+            prisma.vote.count({
+                where: {
+                    election: whereClause
+                }
+            }),
+
+            // Total des candidats
+            prisma.candidate.count({
+                where: {
+                    election: whereClause
+                }
+            })
+        ]);
+
+        res.json({
+            type: type.toUpperCase(),
+            statistics: {
+                totalElections,
+                activeElections,
+                upcomingElections,
+                closedElections,
+                totalVotes,
+                totalCandidates,
+                averageCandidatesPerElection: totalElections > 0
+                    ? (totalCandidates / totalElections).toFixed(1)
+                    : 0,
+                averageVotesPerElection: totalElections > 0
+                    ? (totalVotes / totalElections).toFixed(1)
+                    : 0
+            },
+            filters: {
+                filiere,
+                annee,
+                ecole
+            },
+            lastUpdated: new Date().toISOString()
+        });
+
+    } catch (error) {
+        console.error('Error fetching election stats by type:', error);
+        res.status(500).json({
+            message: 'Erreur serveur lors de la récupération des statistiques',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+});
+
 export default router;
