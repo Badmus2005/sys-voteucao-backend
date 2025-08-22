@@ -8,7 +8,7 @@ import { authenticateToken } from '../middlewares/auth.js';
 const router = express.Router();
 
 // Configuration du transporteur email
-const transporter = nodemailer.createTransporter({
+const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
         user: process.env.EMAIL_USER,
