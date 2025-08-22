@@ -523,3 +523,4 @@ router.get('/stats/by-type/:type', async (req, res) => {
 });
 
 export default router;
+
