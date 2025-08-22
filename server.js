@@ -12,6 +12,7 @@ import adminRegisterRouter from './routes/adminRegister.js';
 import adminLoginRouter from './routes/adminLogin.js';
 import candidatsRouter from './routes/candidats.js';
 import electionRouter from './routes/election.js';
+import studentsRouter from './routes/students.js';
 import uploadRouter from './routes/upload.js';
 import userLoginRouter from './routes/userLogin.js';
 import usersRouter from './routes/users.js';
@@ -57,6 +58,7 @@ app.get('/api/health', (req, res) => {
 app.use('/api/adminRegister', adminRegisterRouter);
 app.use('/api/adminLogin', adminLoginRouter);
 app.use('/api/admin', adminRouter);
+app.use('/api/students', studentsRouter);
 app.use('/api/candidats', candidatsRouter);
 app.use('/api/election', electionRouter);
 app.use('/api/upload', uploadRouter);

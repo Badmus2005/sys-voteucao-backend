@@ -5,155 +5,383 @@ import { authenticateToken } from '../middlewares/auth.js';
 const router = express.Router();
 
 /**
- * GET /stats
- * Route générale pour les statistiques (redirige vers dashboard)
+ * GET /stats/general
+ * Récupère les statistiques générales pour le dashboard
  */
-router.get('/', authenticateToken, async (req, res) => {
-    // Rediriger vers la route dashboard pour maintenir la compatibilité
-    req.url = '/dashboard';
-    return router.handle(req, res);
-});
-
-/**
- * GET /stats/dashboard
- * Récupère les statistiques pour le dashboard admin
- */
-router.get('/dashboard', authenticateToken, async (req, res) => {
+router.get('/general', authenticateToken, async (req, res) => {
     try {
-        const [totalUsers, totalVotes, todayVotes, totalCandidates] = await Promise.all([
-            prisma.user.count(),
-            prisma.vote.count(),
-            prisma.vote.count({
+        const { period = '30', electionId } = req.query;
+
+        // Calcul des dates en fonction de la période
+        const startDate = calculateStartDate(parseInt(period));
+
+        // Statistiques générales
+        const [totalUsers, totalVotes, totalElections, totalCandidates] = await Promise.all([
+            prisma.user.count({
                 where: {
-                    createdAt: {
-                        gte: new Date(new Date().setHours(0, 0, 0, 0))
-                    }
+                    role: 'ETUDIANT',
+                    createdAt: { gte: startDate }
                 }
             }),
-            prisma.candidate.count()
+            prisma.vote.count({
+                where: electionId ? {
+                    electionId: parseInt(electionId),
+                    createdAt: { gte: startDate }
+                } : {
+                    createdAt: { gte: startDate }
+                }
+            }),
+            prisma.election.count({
+                where: {
+                    createdAt: { gte: startDate }
+                }
+            }),
+            prisma.candidate.count({
+                where: {
+                    createdAt: { gte: startDate }
+                }
+            })
         ]);
 
-        // Calcul des pourcentages
-        const userGrowth = await calculateGrowth('user');
-        const voteGrowth = await calculateGrowth('vote');
+        // Calcul du taux de participation
+        const participationData = await calculateParticipationRate(electionId, startDate);
+
+        // Temps moyen de vote (simulation - à adapter selon votre modèle de données)
+        const avgVoteTime = await calculateAverageVoteTime(electionId, startDate);
 
         res.json({
-            users: {
-                total: totalUsers,
-                percent: userGrowth
-            },
-            votes: {
-                total: totalVotes,
-                percent: voteGrowth,
-                today: todayVotes
-            },
-            candidates: {
-                total: totalCandidates
-            }
+            totalUsers,
+            totalVotes,
+            totalElections,
+            totalCandidates,
+            participationRate: participationData.rate,
+            avgVoteTime,
+            lastUpdated: new Date().toISOString()
         });
-    } catch (err) {
-        console.error("Erreur stats:", err);
-        res.status(500).json({ message: "Erreur serveur" });
+    } catch (error) {
+        console.error('Erreur stats générales:', error);
+        res.status(500).json({
+            message: 'Erreur serveur',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
     }
 });
 
 /**
- * GET /stats/election/:id
- * Récupère les statistiques pour une élection spécifique
+ * GET /stats/votes
+ * Récupère les données pour le graphique d'évolution des votes
  */
-router.get('/election/:id', authenticateToken, async (req, res) => {
+router.get('/votes', authenticateToken, async (req, res) => {
     try {
-        const { id } = req.params;
-        
-        const election = await prisma.election.findUnique({
-            where: { id: parseInt(id) },
+        const { period = '30', electionId } = req.query;
+        const startDate = calculateStartDate(parseInt(period));
+
+        // Récupérer les votes groupés par jour
+        const votesByDay = await prisma.vote.groupBy({
+            by: ['createdAt'],
+            where: {
+                ...(electionId && { electionId: parseInt(electionId) }),
+                createdAt: { gte: startDate }
+            },
+            _count: { _all: true },
+            orderBy: { createdAt: 'asc' }
+        });
+
+        // Formater les données pour Chart.js
+        const labels = [];
+        const values = [];
+
+        // Générer les données pour chaque jour de la période
+        const currentDate = new Date(startDate);
+        const today = new Date();
+
+        while (currentDate <= today) {
+            const dateStr = currentDate.toISOString().split('T')[0];
+            const votesForDay = votesByDay.find(v =>
+                v.createdAt.toISOString().split('T')[0] === dateStr
+            );
+
+            labels.push(formatDate(currentDate));
+            values.push(votesForDay ? votesForDay._count._all : 0);
+
+            currentDate.setDate(currentDate.getDate() + 1);
+        }
+
+        res.json({ labels, values });
+    } catch (error) {
+        console.error('Erreur stats votes:', error);
+        res.status(500).json({
+            message: 'Erreur serveur',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+});
+
+/**
+ * GET /stats/distribution
+ * Récupère la répartition des votes par candidat
+ */
+router.get('/distribution', authenticateToken, async (req, res) => {
+    try {
+        const { electionId } = req.query;
+
+        if (!electionId) {
+            return res.status(400).json({ message: 'ID d\'élection requis' });
+        }
+
+        const votesDistribution = await prisma.candidate.findMany({
+            where: { electionId: parseInt(electionId) },
+            include: {
+                _count: {
+                    select: { votes: true }
+                },
+                user: {
+                    include: {
+                        etudiant: true
+                    }
+                }
+            },
+            orderBy: {
+                votes: { _count: 'desc' }
+            }
+        });
+
+        const labels = votesDistribution.map(c => `${c.user.etudiant.prenom} ${c.user.etudiant.nom}`);
+        const values = votesDistribution.map(c => c._count.votes);
+
+        res.json({ labels, values });
+    } catch (error) {
+        console.error('Erreur distribution votes:', error);
+        res.status(500).json({
+            message: 'Erreur serveur',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+});
+
+/**
+ * GET /stats/hourly
+ * Récupère la participation par heure
+ */
+router.get('/hourly', authenticateToken, async (req, res) => {
+    try {
+        const { period = '7', electionId } = req.query;
+        const startDate = calculateStartDate(parseInt(period));
+
+        // Récupérer les votes groupés par heure
+        const votesByHour = await prisma.vote.groupBy({
+            by: ['createdAt'],
+            where: {
+                ...(electionId && { electionId: parseInt(electionId) }),
+                createdAt: { gte: startDate }
+            },
+            _count: { _all: true }
+        });
+
+        // Préparer les données pour les 24 heures
+        const hourlyData = Array(24).fill(0);
+
+        votesByHour.forEach(vote => {
+            const hour = new Date(vote.createdAt).getHours();
+            hourlyData[hour] += vote._count._all;
+        });
+
+        const labels = Array.from({ length: 24 }, (_, i) => `${i}h`);
+        const values = hourlyData;
+
+        res.json({ labels, values });
+    } catch (error) {
+        console.error('Erreur stats horaires:', error);
+        res.status(500).json({
+            message: 'Erreur serveur',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+});
+
+/**
+ * GET /stats/comparison
+ * Récupère les données de comparaison entre élections
+ */
+router.get('/comparison', authenticateToken, async (req, res) => {
+    try {
+        const { period = '365' } = req.query;
+        const startDate = calculateStartDate(parseInt(period));
+
+        const elections = await prisma.election.findMany({
+            where: {
+                createdAt: { gte: startDate }
+            },
             include: {
                 _count: {
                     select: {
                         votes: true,
-                        voteTokens: true,
-                        candidates: true
+                        voteTokens: true
                     }
-                },
-                candidates: {
-                    include: {
-                        user: {
-                            include: {
-                                etudiant: true
-                            }
-                        },
-                        _count: {
-                            select: { votes: true }
-                        }
+                }
+            },
+            orderBy: { dateDebut: 'asc' }
+        });
+
+        const labels = elections.map(e => e.titre);
+        const registered = elections.map(e => e._count.voteTokens);
+        const voters = elections.map(e => e._count.votes);
+
+        res.json({ labels, registered, voters });
+    } catch (error) {
+        console.error('Erreur comparaison élections:', error);
+        res.status(500).json({
+            message: 'Erreur serveur',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+});
+
+/**
+ * GET /stats/export
+ * Export des statistiques
+ */
+router.get('/export', authenticateToken, async (req, res) => {
+    try {
+        const { format = 'pdf', period = '30', electionId } = req.query;
+
+        // Ici vous implémenteriez la logique d'export réelle
+        // Pour l'exemple, nous retournons un JSON
+        const statsData = await generateExportData(period, electionId);
+
+        if (format === 'json') {
+            res.json(statsData);
+        } else {
+            // Pour PDF/Excel, vous utiliseriez des bibliothèques comme pdfkit ou exceljs
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Content-Disposition', `attachment; filename=statistiques-${new Date().toISOString().split('T')[0]}.json`);
+            res.json(statsData);
+        }
+    } catch (error) {
+        console.error('Erreur export stats:', error);
+        res.status(500).json({
+            message: 'Erreur serveur',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+});
+
+// Fonctions utilitaires
+function calculateStartDate(days) {
+    const date = new Date();
+    date.setDate(date.getDate() - days);
+    return date;
+}
+
+function formatDate(date) {
+    return date.toLocaleDateString('fr-FR', {
+        day: '2-digit',
+        month: '2-digit'
+    });
+}
+
+async function calculateParticipationRate(electionId, startDate) {
+    if (electionId) {
+        const election = await prisma.election.findUnique({
+            where: { id: parseInt(electionId) },
+            include: {
+                _count: {
+                    select: {
+                        votes: true,
+                        voteTokens: true
                     }
                 }
             }
         });
 
-        if (!election) {
-            return res.status(404).json({ message: 'Élection non trouvée' });
+        if (election && election._count.voteTokens > 0) {
+            return {
+                rate: ((election._count.votes / election._count.voteTokens) * 100).toFixed(1),
+                totalVotes: election._count.votes,
+                totalVoters: election._count.voteTokens
+            };
         }
-
-        // Calculer les statistiques détaillées
-        const totalVotes = election._count.votes;
-        const totalTokens = election._count.voteTokens;
-        const participationRate = totalTokens > 0 ? (totalVotes / totalTokens * 100).toFixed(2) : 0;
-
-        // Statistiques par candidat
-        const candidateStats = election.candidates.map(candidate => ({
-            id: candidate.id,
-            nom: candidate.nom,
-            prenom: candidate.prenom,
-            filiere: candidate.user.etudiant.filiere,
-            annee: candidate.user.etudiant.annee,
-            votes: candidate._count.votes,
-            percentage: totalVotes > 0 ? (candidate._count.votes / totalVotes * 100).toFixed(2) : 0
-        }));
-
-        // Trier par nombre de votes décroissant
-        candidateStats.sort((a, b) => b.votes - a.votes);
-
-        res.json({
-            election: {
-                id: election.id,
-                titre: election.titre,
-                type: election.type,
-                dateDebut: election.dateDebut,
-                dateFin: election.dateFin,
-                isActive: election.isActive
-            },
-            stats: {
-                totalVotes,
-                totalTokens,
-                participationRate: parseFloat(participationRate),
-                totalCandidates: election._count.candidates
-            },
-            candidates: candidateStats
-        });
-    } catch (error) {
-        console.error('Erreur stats élection:', error);
-        res.status(500).json({ message: 'Erreur serveur' });
     }
-});
 
-// Helper function
-async function calculateGrowth(entity) {
-    try {
-        const now = new Date();
-        const lastMonth = new Date(now.setMonth(now.getMonth() - 1));
+    // Calcul global si pas d'élection spécifique
+    const [totalVotes, totalVoters] = await Promise.all([
+        prisma.vote.count({
+            where: { createdAt: { gte: startDate } }
+        }),
+        prisma.voteToken.count({
+            where: { createdAt: { gte: startDate } }
+        })
+    ]);
 
-        const currentCount = await prisma[entity].count();
-        const previousCount = await prisma[entity].count({
-            where: {
-                createdAt: { lt: lastMonth }
-            }
-        });
+    return {
+        rate: totalVoters > 0 ? ((totalVotes / totalVoters) * 100).toFixed(1) : 0,
+        totalVotes,
+        totalVoters
+    };
+}
 
-        if (previousCount === 0) return 100;
-        return Math.round(((currentCount - previousCount) / previousCount) * 100);
-    } catch {
-        return 0;
-    }
+async function calculateAverageVoteTime(electionId, startDate) {
+    // Cette fonction est une simulation
+    // Dans une vraie implémentation, vous auriez un champ voteDuration dans votre modèle Vote
+    return Math.random() * 10 + 15; // Entre 15 et 25 secondes
+}
+
+async function generateExportData(period, electionId) {
+    const startDate = calculateStartDate(parseInt(period));
+
+    const [generalStats, votesData, distributionData, hourlyData, comparisonData] = await Promise.all([
+        // Données générales
+        (async () => {
+            const [users, votes, elections, candidates] = await Promise.all([
+                prisma.user.count({ where: { createdAt: { gte: startDate } } }),
+                prisma.vote.count({
+                    where: electionId ? {
+                        electionId: parseInt(electionId),
+                        createdAt: { gte: startDate }
+                    } : { createdAt: { gte: startDate } }
+                }),
+                prisma.election.count({ where: { createdAt: { gte: startDate } } }),
+                prisma.candidate.count({ where: { createdAt: { gte: startDate } } })
+            ]);
+
+            const participation = await calculateParticipationRate(electionId, startDate);
+            const avgTime = await calculateAverageVoteTime(electionId, startDate);
+
+            return { users, votes, elections, candidates, participationRate: participation.rate, avgVoteTime: avgTime };
+        })(),
+
+        // Données votes
+        fetch(`${req.protocol}://${req.get('host')}/api/stats/votes?period=${period}${electionId ? `&electionId=${electionId}` : ''}`)
+            .then(r => r.json()),
+
+        // Données distribution
+        electionId ?
+            fetch(`${req.protocol}://${req.get('host')}/api/stats/distribution?electionId=${electionId}`)
+                .then(r => r.json())
+            : { labels: [], values: [] },
+
+        // Données horaires
+        fetch(`${req.protocol}://${req.get('host')}/api/stats/hourly?period=${period}${electionId ? `&electionId=${electionId}` : ''}`)
+            .then(r => r.json()),
+
+        // Données comparaison
+        fetch(`${req.protocol}://${req.get('host')}/api/stats/comparison?period=${period}`)
+            .then(r => r.json())
+    ]);
+
+    return {
+        metadata: {
+            generatedAt: new Date().toISOString(),
+            period,
+            electionId: electionId || 'all',
+            dateRange: { start: startDate.toISOString(), end: new Date().toISOString() }
+        },
+        general: generalStats,
+        votes: votesData,
+        distribution: distributionData,
+        hourly: hourlyData,
+        comparison: comparisonData
+    };
 }
 
 export default router;
