@@ -68,6 +68,9 @@ model Election {
   annee       Int?
   ecole       String?
   isActive    Boolean     @default(true)
+  niveau        Int? // 1 = Salle, 2 = École, 3 = Université
+  delegueType   DelegueType? // utile pour les niveaux 2 et 3
+
   
   candidates  Candidate[]
   votes       Vote[]
@@ -94,6 +97,7 @@ model Vote {
   electionId  Int
   candidateId Int
   createdAt   DateTime  @default(now())
+  poidsVote     Float? // ex: 1.0 pour vote normal, 0.6 ou 0.4 selon le profil
 
   user        User      @relation(fields: [userId], references: [id])
   election    Election  @relation(fields: [electionId], references: [id])
@@ -140,6 +144,42 @@ model ActivityLog {
 
   user      User?    @relation("UserActivityLogs", fields: [userId], references: [id])
 }
+
+model ResponsableSalle {
+  id         Int      @id @default(autoincrement())
+  etudiantId Int
+  filiere    String
+  annee      Int
+  ecole      String
+  createdAt  DateTime @default(now())
+
+  etudiant   Etudiant @relation(fields: [etudiantId], references: [id])
+}
+
+model DelegueEcole {
+  id              Int      @id @default(autoincrement())
+  responsableId   Int
+  typeDelegue     DelegueType
+  ecole           String
+  createdAt       DateTime @default(now())
+
+  responsable     ResponsableSalle @relation(fields: [responsableId], references: [id])
+}
+
+model DelegueUniversite {
+  id            Int      @id @default(autoincrement())
+  delegueEcoleId Int
+  typeDelegue   DelegueType
+  createdAt     DateTime @default(now())
+
+  delegueEcole  DelegueEcole @relation(fields: [delegueEcoleId], references: [id])
+}
+
+enum DelegueType {
+  PREMIER
+  DEUXIEME
+}
+
 
 enum Role {
   ETUDIANT
