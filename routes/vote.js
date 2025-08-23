@@ -5,28 +5,20 @@ import VoteToken from '../models/VoteToken.js';
 
 const router = express.Router();
 
-
 // Récupérer le jeton de vote pour une élection
 router.get('/token/:electionId', authenticateToken, async (req, res) => {
     try {
         const userId = req.user.id;
         const { electionId } = req.params;
 
-        // Vérifier que l'élection existe et est active
         const election = await prisma.election.findUnique({
-            where: { id: parseInt(electionId) },
-            include: {
-                _count: {
-                    select: { voteTokens: true }
-                }
-            }
+            where: { id: parseInt(electionId) }
         });
 
         if (!election || !election.isActive) {
             return res.status(400).json({ message: "Cette élection n'est pas active" });
         }
 
-        // Vérifier que l'étudiant est éligible pour cette élection
         const etudiant = await prisma.etudiant.findUnique({
             where: { userId },
             include: { user: true }
@@ -36,14 +28,12 @@ router.get('/token/:electionId', authenticateToken, async (req, res) => {
             return res.status(403).json({ message: 'Accès refusé' });
         }
 
-        // Vérifier l'éligibilité selon le type d'élection
         if (!isEligibleForElection(etudiant, election)) {
             return res.status(403).json({
                 message: 'Vous n\'êtes pas éligible pour cette élection'
             });
         }
 
-        // Récupérer ou créer le jeton de vote
         let voteToken = await prisma.voteToken.findFirst({
             where: {
                 userId,
@@ -54,7 +44,6 @@ router.get('/token/:electionId', authenticateToken, async (req, res) => {
         });
 
         if (!voteToken) {
-            // Créer un nouveau jeton si nécessaire
             voteToken = await VoteToken.createToken(userId, parseInt(electionId));
         }
 
@@ -73,7 +62,7 @@ router.get('/token/:electionId', authenticateToken, async (req, res) => {
     }
 });
 
-// Voter avec un jeton
+// Soumettre un vote
 router.post('/', async (req, res) => {
     try {
         const { electionId, candidateId, voteToken } = req.body;
@@ -84,28 +73,21 @@ router.post('/', async (req, res) => {
             });
         }
 
-        // Valider le jeton de vote
         const validatedToken = await VoteToken.validateToken(voteToken, parseInt(electionId));
         if (!validatedToken) {
-            return res.status(400).json({
-                message: 'Jeton de vote invalide ou expiré'
-            });
+            return res.status(400).json({ message: 'Jeton de vote invalide ou expiré' });
         }
 
         const userId = validatedToken.userId;
 
-        // Vérifier que l'élection est active
         const election = await prisma.election.findUnique({
             where: { id: parseInt(electionId) }
         });
 
         if (!election || !election.isActive) {
-            return res.status(400).json({
-                message: "Cette élection n'est pas active"
-            });
+            return res.status(400).json({ message: "Cette élection n'est pas active" });
         }
 
-        // Vérifier que l'utilisateur n'a pas déjà voté pour cette élection
         const existingVote = await prisma.vote.findUnique({
             where: {
                 userId_electionId: {
@@ -116,23 +98,18 @@ router.post('/', async (req, res) => {
         });
 
         if (existingVote) {
-            return res.status(400).json({
-                message: 'Vous avez déjà voté pour cette élection'
-            });
+            return res.status(400).json({ message: 'Vous avez déjà voté pour cette élection' });
         }
 
-        // Vérifier que le candidat appartient bien à l'élection
         const candidate = await prisma.candidate.findUnique({
             where: { id: parseInt(candidateId) }
         });
 
         if (!candidate || candidate.electionId !== parseInt(electionId)) {
-            return res.status(400).json({
-                message: 'Candidat invalide pour cette élection'
-            });
+            return res.status(400).json({ message: 'Candidat invalide pour cette élection' });
         }
 
-        // Enregistrer le vote
+        // ENREGISTREMENT DU VOTE (SANS POIDS)
         await prisma.vote.create({
             data: {
                 userId,
@@ -141,7 +118,6 @@ router.post('/', async (req, res) => {
             },
         });
 
-        // Marquer le jeton comme utilisé
         await VoteToken.markTokenAsUsed(voteToken);
 
         res.json({ message: 'Vote enregistré avec succès' });
@@ -151,7 +127,7 @@ router.post('/', async (req, res) => {
     }
 });
 
-// Récupérer les résultats d'une élection (après clôture)
+// Récupérer les résultats d'une élection (AVEC PONDÉRATION 60/40)
 router.get('/results/:electionId', async (req, res) => {
     try {
         const { electionId } = req.params;
@@ -168,11 +144,23 @@ router.get('/results/:electionId', async (req, res) => {
                         }
                     }
                 },
-                _count: {
-                    select: {
-                        votes: true,
-                        voteTokens: true
+                votes: {
+                    include: {
+                        user: {
+                            include: {
+                                etudiant: {
+                                    include: {
+                                        responsableSalle: {
+                                            where: { ecole: election.ecole } // Filtrer par école de l'élection
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
+                },
+                _count: {
+                    select: { voteTokens: true }
                 }
             }
         });
@@ -181,54 +169,92 @@ router.get('/results/:electionId', async (req, res) => {
             return res.status(404).json({ message: 'Élection non trouvée' });
         }
 
-        // Calculer les résultats
-        const results = await prisma.vote.groupBy({
-            by: ['candidateId'],
-            where: { electionId: parseInt(electionId) },
-            _count: { candidateId: true }
-        });
+        // SÉPARATION DES VOTES
+        const votesResponsables = election.votes.filter(vote =>
+            vote.user.etudiant?.responsableSalle &&
+            vote.user.etudiant.responsableSalle.length > 0
+        );
 
-        // Formater les résultats
-        const formattedResults = election.candidates.map(candidate => {
-            const voteCount = results.find(r => r.candidateId === candidate.id)?._count.candidateId || 0;
-            const totalVotes = election._count.votes;
-            const percentage = totalVotes > 0 ? (voteCount / totalVotes * 100).toFixed(2) : 0;
+        const votesEtudiants = election.votes.filter(vote =>
+            !vote.user.etudiant?.responsableSalle ||
+            vote.user.etudiant.responsableSalle.length === 0
+        );
+
+        // CALCUL DES RÉSULTATS BRUTS
+        const calculerVotes = (votes) => {
+            const resultats = {};
+            election.candidates.forEach(candidate => {
+                resultats[candidate.id] = 0;
+            });
+            votes.forEach(vote => {
+                resultats[vote.candidateId] = (resultats[vote.candidateId] || 0) + 1;
+            });
+            return resultats;
+        };
+
+        const votesParCandidatResponsables = calculerVotes(votesResponsables);
+        const votesParCandidatEtudiants = calculerVotes(votesEtudiants);
+
+        const totalVotesResponsables = votesResponsables.length;
+        const totalVotesEtudiants = votesEtudiants.length;
+
+        // CALCUL DES RÉSULTATS PONDÉRÉS
+        const resultatsPonderes = election.candidates.map(candidate => {
+            const votesRespo = votesParCandidatResponsables[candidate.id] || 0;
+            const votesEtud = votesParCandidatEtudiants[candidate.id] || 0;
+
+            const pourcentageRespo = totalVotesResponsables > 0
+                ? (votesRespo / totalVotesResponsables) * 100
+                : 0;
+            const pourcentageEtud = totalVotesEtudiants > 0
+                ? (votesEtud / totalVotesEtudiants) * 100
+                : 0;
+
+            const scoreFinal = (pourcentageRespo * 0.6) + (pourcentageEtud * 0.4);
 
             return {
-                id: candidate.id,
+                candidateId: candidate.id,
                 nom: candidate.nom,
                 prenom: candidate.prenom,
-                filiere: candidate.user.etudiant.filiere,
-                annee: candidate.user.etudiant.annee,
-                votes: voteCount,
-                percentage: `${percentage}%`
+                scoreFinal: parseFloat(scoreFinal.toFixed(2)),
+                details: {
+                    votesResponsables: votesRespo,
+                    votesEtudiants: votesEtud,
+                    totalVotes: votesRespo + votesEtud,
+                    pourcentageResponsables: parseFloat(pourcentageRespo.toFixed(2)),
+                    pourcentageEtudiants: parseFloat(pourcentageEtud.toFixed(2))
+                }
             };
         });
 
-        // Trier par nombre de votes décroissant
-        formattedResults.sort((a, b) => b.votes - a.votes);
+        // TRI PAR SCORE FINAL
+        resultatsPonderes.sort((a, b) => b.scoreFinal - a.scoreFinal);
 
-        const electionResults = {
+        const response = {
             election: {
                 id: election.id,
                 titre: election.titre,
                 type: election.type,
+                ecole: election.ecole,
                 dateDebut: election.dateDebut,
                 dateFin: election.dateFin,
                 isActive: election.isActive
             },
-            stats: {
-                totalVotes: election._count.votes,
-                totalTokens: election._count.voteTokens,
-                participationRate: election._count.voteTokens > 0 ?
-                    (election._count.votes / election._count.voteTokens * 100).toFixed(2) : 0
+            statistiques: {
+                totalVotes: election.votes.length,
+                votesResponsables: totalVotesResponsables,
+                votesEtudiants: totalVotesEtudiants,
+                totalInscrits: election._count.voteTokens,
+                tauxParticipation: election._count.voteTokens > 0
+                    ? parseFloat(((election.votes.length / election._count.voteTokens) * 100).toFixed(2))
+                    : 0
             },
-            results: formattedResults
+            resultats: resultatsPonderes
         };
 
-        res.json(electionResults);
+        res.json(response);
     } catch (error) {
-        console.error(error);
+        console.error('Erreur calcul résultats:', error);
         res.status(500).json({ message: 'Erreur serveur' });
     }
 });
@@ -248,34 +274,25 @@ router.get('/status/:electionId', authenticateToken, async (req, res) => {
             },
         });
 
-        const hasVoted = !!vote;
-        res.json({ hasVoted, electionId: parseInt(electionId) });
+        res.json({
+            hasVoted: !!vote,
+            electionId: parseInt(electionId)
+        });
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Erreur serveur' });
     }
 });
 
-/**
- * Vérifie si un étudiant est éligible pour une élection donnée
- * @param {Object} etudiant - L'étudiant à vérifier
- * @param {Object} election - L'élection
- * @returns {boolean} True si éligible
- */
+// FONCTION: Vérifier l'éligibilité
 function isEligibleForElection(etudiant, election) {
     if (election.type === 'SALLE') {
         return etudiant.filiere === election.filiere && etudiant.annee === election.annee;
     } else if (election.type === 'ECOLE') {
-        // Pour les élections d'école, vérifier si l'étudiant est responsable de salle
-        // Cette logique peut être étendue selon vos besoins
-        return etudiant.filiere.includes(election.ecole) ||
-            etudiant.filiere === election.ecole;
+        return etudiant.ecole === election.ecole;
     } else if (election.type === 'UNIVERSITE') {
-        // Pour les élections universitaires, vérifier si l'étudiant est délégué d'école
-        // Cette logique peut être étendue selon vos besoins
-        return true; // Temporairement tous les étudiants sont éligibles
+        return true;
     }
-
     return false;
 }
 

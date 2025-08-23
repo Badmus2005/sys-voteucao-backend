@@ -119,6 +119,14 @@ model DelegueEcole {
   @@unique([responsableId, typeDelegue, ecole]) // Contrainte ajoutée
 }
 
+model DelegueUniversite {
+  id            Int      @id @default(autoincrement())
+  delegueEcoleId Int
+  typeDelegue   DelegueType
+  createdAt     DateTime @default(now())
+
+  delegueEcole  DelegueEcole @relation(fields: [delegueEcoleId], references: [id])
+}
 
 model Admin {
   id      Int    @id @default(autoincrement())

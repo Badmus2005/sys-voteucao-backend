@@ -5,7 +5,6 @@ import VoteToken from '../models/VoteToken.js';
 
 const router = express.Router();
 
-
 // Récupérer toutes les élections actives
 router.get('/', async (req, res) => {
     try {
@@ -35,27 +34,114 @@ router.get('/', async (req, res) => {
     }
 });
 
-// Récupérer les élections par type et niveau
+// Récupérer les élections par type et niveau (AVEC PAGINATION)
 router.get('/by-type/:type', async (req, res) => {
     try {
         const { type } = req.params;
-        const { filiere, annee, ecole } = req.query;
+        const { filiere, annee, ecole, page = 1, limit = 10, status = 'active' } = req.query;
 
-        let whereClause = {
-            type: type.toUpperCase(),
-            isActive: true
-        };
+        const validTypes = ['SALLE', 'ECOLE', 'UNIVERSITE'];
+        if (!validTypes.includes(type.toUpperCase())) {
+            return res.status(400).json({
+                message: 'Type d\'élection invalide. Types valides: SALLE, ECOLE, UNIVERSITE'
+            });
+        }
 
-        // Filtres selon le type d'élection
-        if (type === 'SALLE') {
+        let whereClause = { type: type.toUpperCase() };
+
+        if (status === 'active') {
+            whereClause.isActive = true;
+            whereClause.dateDebut = { lte: new Date() };
+            whereClause.dateFin = { gte: new Date() };
+        } else if (status === 'upcoming') {
+            whereClause.isActive = true;
+            whereClause.dateDebut = { gt: new Date() };
+        } else if (status === 'closed') {
+            whereClause.isActive = false;
+        }
+
+        if (type.toUpperCase() === 'SALLE') {
             if (filiere) whereClause.filiere = filiere;
             if (annee) whereClause.annee = parseInt(annee);
-        } else if (type === 'ECOLE') {
+        } else if (type.toUpperCase() === 'ECOLE') {
             if (ecole) whereClause.ecole = ecole;
         }
 
-        const elections = await prisma.election.findMany({
-            where: whereClause,
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+        const take = parseInt(limit);
+
+        const [elections, total] = await Promise.all([
+            prisma.election.findMany({
+                where: whereClause,
+                include: {
+                    candidates: {
+                        include: {
+                            user: {
+                                include: {
+                                    etudiant: true
+                                }
+                            }
+                        }
+                    },
+                    _count: {
+                        select: { votes: true, candidates: true, voteTokens: true }
+                    }
+                },
+                orderBy: { dateDebut: 'desc' },
+                skip,
+                take
+            }),
+            prisma.election.count({ where: whereClause })
+        ]);
+
+        const electionsWithStats = elections.map(election => {
+            const totalVotes = election._count.votes;
+            const totalTokens = election._count.voteTokens;
+            const participationRate = totalTokens > 0
+                ? Math.round((totalVotes / totalTokens) * 100)
+                : 0;
+
+            return {
+                ...election,
+                stats: {
+                    totalVotes,
+                    totalTokens,
+                    participationRate: `${participationRate}%`,
+                    candidatesCount: election._count.candidates
+                }
+            };
+        });
+
+        const totalPages = Math.ceil(total / parseInt(limit));
+
+        res.json({
+            elections: electionsWithStats,
+            pagination: {
+                currentPage: parseInt(page),
+                totalPages,
+                totalElections: total,
+                hasNext: parseInt(page) < totalPages,
+                hasPrev: parseInt(page) > 1
+            },
+            filters: { type, filiere, annee, ecole, status }
+        });
+
+    } catch (error) {
+        console.error('Error fetching elections by type:', error);
+        res.status(500).json({
+            message: 'Erreur serveur lors de la récupération des élections',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+});
+
+// Récupérer une élection spécifique
+router.get('/:id', async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const election = await prisma.election.findUnique({
+            where: { id: parseInt(id) },
             include: {
                 candidates: {
                     include: {
@@ -67,13 +153,29 @@ router.get('/by-type/:type', async (req, res) => {
                     }
                 },
                 _count: {
-                    select: { votes: true }
+                    select: { votes: true, voteTokens: true }
                 }
-            },
-            orderBy: { dateDebut: 'desc' }
+            }
         });
 
-        res.json(elections);
+        if (!election) {
+            return res.status(404).json({ message: 'Élection non trouvée' });
+        }
+
+        const totalVotes = election._count.votes;
+        const totalTokens = election._count.voteTokens;
+        const participationRate = totalTokens > 0 ? (totalVotes / totalTokens * 100).toFixed(2) : 0;
+
+        const electionWithStats = {
+            ...election,
+            stats: {
+                totalVotes,
+                totalTokens,
+                participationRate: `${participationRate}%`
+            }
+        };
+
+        res.json(electionWithStats);
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Erreur serveur' });
@@ -83,7 +185,6 @@ router.get('/by-type/:type', async (req, res) => {
 // Créer une nouvelle élection (admin seulement)
 router.post('/', authenticateToken, async (req, res) => {
     try {
-        // Vérifier que l'utilisateur est admin
         const user = await prisma.user.findUnique({
             where: { id: req.user.id },
             include: { admin: true }
@@ -93,9 +194,8 @@ router.post('/', authenticateToken, async (req, res) => {
             return res.status(403).json({ message: 'Accès refusé' });
         }
 
-        const { type, titre, description, dateDebut, dateFin, filiere, annee, ecole } = req.body;
+        const { type, titre, description, dateDebut, dateFin, filiere, annee, ecole, niveau, delegueType } = req.body;
 
-        // Validation des données selon le type
         if (type === 'SALLE' && (!filiere || !annee)) {
             return res.status(400).json({
                 message: 'Les élections par salle nécessitent filière et année'
@@ -117,11 +217,12 @@ router.post('/', authenticateToken, async (req, res) => {
                 dateFin: new Date(dateFin),
                 filiere,
                 annee: annee ? parseInt(annee) : null,
-                ecole
+                ecole,
+                niveau: parseInt(niveau),
+                delegueType: delegueType || null
             }
         });
 
-        // Générer automatiquement les jetons de vote pour tous les étudiants éligibles
         await generateVoteTokensForElection(election);
 
         res.status(201).json({
@@ -134,61 +235,9 @@ router.post('/', authenticateToken, async (req, res) => {
     }
 });
 
-// Récupérer une élection spécifique avec ses candidats et statistiques
-router.get('/:id', async (req, res) => {
-    try {
-        const { id } = req.params;
-
-        const election = await prisma.election.findUnique({
-            where: { id: parseInt(id) },
-            include: {
-                candidates: {
-                    include: {
-                        user: {
-                            include: {
-                                etudiant: true
-                            }
-                        }
-                    }
-                },
-                _count: {
-                    select: {
-                        votes: true,
-                        voteTokens: true
-                    }
-                }
-            }
-        });
-
-        if (!election) {
-            return res.status(404).json({ message: 'Élection non trouvée' });
-        }
-
-        // Calculer les statistiques
-        const totalVotes = election._count.votes;
-        const totalTokens = election._count.voteTokens;
-        const participationRate = totalTokens > 0 ? (totalVotes / totalTokens * 100).toFixed(2) : 0;
-
-        const electionWithStats = {
-            ...election,
-            stats: {
-                totalVotes,
-                totalTokens,
-                participationRate: `${participationRate}%`
-            }
-        };
-
-        res.json(electionWithStats);
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Erreur serveur' });
-    }
-});
-
 // Clôturer une élection (admin seulement)
 router.put('/:id/close', authenticateToken, async (req, res) => {
     try {
-        // Vérifier que l'utilisateur est admin
         const user = await prisma.user.findUnique({
             where: { id: req.user.id },
             include: { admin: true }
@@ -218,7 +267,6 @@ router.put('/:id/close', authenticateToken, async (req, res) => {
 // Supprimer une élection (admin seulement)
 router.delete('/:id', authenticateToken, async (req, res) => {
     try {
-        // Vérifier que l'utilisateur est admin
         const user = await prisma.user.findUnique({
             where: { id: req.user.id },
             include: { admin: true }
@@ -230,7 +278,6 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 
         const { id } = req.params;
 
-        // Supprimer en cascade (jetons, votes, candidats)
         await prisma.election.delete({
             where: { id: parseInt(id) }
         });
@@ -242,187 +289,15 @@ router.delete('/:id', authenticateToken, async (req, res) => {
     }
 });
 
-/**
- * Génère automatiquement les jetons de vote pour tous les étudiants éligibles
- * @param {Object} election - L'élection pour laquelle générer les jetons
- */
-async function generateVoteTokensForElection(election) {
-    try {
-        let eligibleStudents = [];
-
-        if (election.type === 'SALLE') {
-            // Élections par salle : étudiants de la même filière et année
-            eligibleStudents = await prisma.etudiant.findMany({
-                where: {
-                    filiere: election.filiere,
-                    annee: election.annee
-                },
-                include: { user: true }
-            });
-        } else if (election.type === 'ECOLE') {
-            // Élections par école : responsables de salle de la même école
-            // Ici on pourrait implémenter une logique plus complexe
-            eligibleStudents = await prisma.etudiant.findMany({
-                where: {
-                    filiere: { contains: election.ecole }
-                },
-                include: { user: true }
-            });
-        } else if (election.type === 'UNIVERSITE') {
-            // Élections universitaires : délégués d'école
-            // Logique à implémenter selon la hiérarchie
-            eligibleStudents = await prisma.etudiant.findMany({
-                include: { user: true }
-            });
-        }
-
-        console.log(`Génération de ${eligibleStudents.length} jetons pour l'élection ${election.titre}`);
-
-        // Générer un jeton pour chaque étudiant éligible
-        for (const student of eligibleStudents) {
-            await VoteToken.createToken(student.userId, election.id);
-        }
-
-        console.log('Jetons de vote générés avec succès');
-    } catch (error) {
-        console.error('Erreur lors de la génération des jetons:', error);
-    }
-}
-
-
-// GET /api/election/by-type/:type - Récupérer les élections par type avec filtres
-router.get('/by-type/:type', async (req, res) => {
-    try {
-        const { type } = req.params;
-        const { filiere, annee, ecole, page = 1, limit = 10, status = 'active' } = req.query;
-
-        // Validation du type d'élection
-        const validTypes = ['SALLE', 'ECOLE', 'UNIVERSITE'];
-        if (!validTypes.includes(type.toUpperCase())) {
-            return res.status(400).json({
-                message: 'Type d\'élection invalide. Types valides: SALLE, ECOLE, UNIVERSITE'
-            });
-        }
-
-        // Construction de la clause WHERE
-        let whereClause = {
-            type: type.toUpperCase()
-        };
-
-        // Filtre par statut
-        if (status === 'active') {
-            whereClause.isActive = true;
-            whereClause.dateDebut = { lte: new Date() };
-            whereClause.dateFin = { gte: new Date() };
-        } else if (status === 'upcoming') {
-            whereClause.isActive = true;
-            whereClause.dateDebut = { gt: new Date() };
-        } else if (status === 'closed') {
-            whereClause.isActive = false;
-        }
-
-        // Filtres spécifiques selon le type d'élection
-        if (type.toUpperCase() === 'SALLE') {
-            if (filiere) whereClause.filiere = filiere;
-            if (annee) whereClause.annee = parseInt(annee);
-        } else if (type.toUpperCase() === 'ECOLE') {
-            if (ecole) whereClause.ecole = ecole;
-        }
-
-        // Pagination
-        const skip = (parseInt(page) - 1) * parseInt(limit);
-        const take = parseInt(limit);
-
-        // Récupération des élections avec pagination
-        const [elections, total] = await Promise.all([
-            prisma.election.findMany({
-                where: whereClause,
-                include: {
-                    candidates: {
-                        include: {
-                            user: {
-                                include: {
-                                    etudiant: true
-                                }
-                            }
-                        }
-                    },
-                    _count: {
-                        select: {
-                            votes: true,
-                            candidates: true,
-                            voteTokens: true
-                        }
-                    }
-                },
-                orderBy: { dateDebut: 'desc' },
-                skip,
-                take
-            }),
-            prisma.election.count({ where: whereClause })
-        ]);
-
-        // Calcul des statistiques de participation
-        const electionsWithStats = elections.map(election => {
-            const totalVotes = election._count.votes;
-            const totalTokens = election._count.voteTokens;
-            const participationRate = totalTokens > 0
-                ? Math.round((totalVotes / totalTokens) * 100)
-                : 0;
-
-            return {
-                ...election,
-                stats: {
-                    totalVotes,
-                    totalTokens,
-                    participationRate: `${participationRate}%`,
-                    candidatesCount: election._count.candidates
-                }
-            };
-        });
-
-        // Informations de pagination
-        const totalPages = Math.ceil(total / parseInt(limit));
-
-        res.json({
-            elections: electionsWithStats,
-            pagination: {
-                currentPage: parseInt(page),
-                totalPages,
-                totalElections: total,
-                hasNext: parseInt(page) < totalPages,
-                hasPrev: parseInt(page) > 1
-            },
-            filters: {
-                type,
-                filiere,
-                annee,
-                ecole,
-                status
-            }
-        });
-
-    } catch (error) {
-        console.error('Error fetching elections by type:', error);
-        res.status(500).json({
-            message: 'Erreur serveur lors de la récupération des élections',
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
-        });
-    }
-});
-
-// GET /api/election/stats/by-type/:type - Statistiques par type d'élection
+// Statistiques par type d'élection
 router.get('/stats/by-type/:type', async (req, res) => {
     try {
         const { type } = req.params;
         const { filiere, annee, ecole } = req.query;
 
-        // Validation du type
         const validTypes = ['SALLE', 'ECOLE', 'UNIVERSITE'];
         if (!validTypes.includes(type.toUpperCase())) {
-            return res.status(400).json({
-                message: 'Type d\'élection invalide'
-            });
+            return res.status(400).json({ message: 'Type d\'élection invalide' });
         }
 
         const whereClause = {
@@ -444,10 +319,7 @@ router.get('/stats/by-type/:type', async (req, res) => {
             totalVotes,
             totalCandidates
         ] = await Promise.all([
-            // Total des élections
             prisma.election.count({ where: whereClause }),
-
-            // Élections actives
             prisma.election.count({
                 where: {
                     ...whereClause,
@@ -456,8 +328,6 @@ router.get('/stats/by-type/:type', async (req, res) => {
                     dateFin: { gte: new Date() }
                 }
             }),
-
-            // Élections à venir
             prisma.election.count({
                 where: {
                     ...whereClause,
@@ -465,27 +335,17 @@ router.get('/stats/by-type/:type', async (req, res) => {
                     dateDebut: { gt: new Date() }
                 }
             }),
-
-            // Élections clôturées
             prisma.election.count({
                 where: {
                     ...whereClause,
                     isActive: false
                 }
             }),
-
-            // Total des votes
             prisma.vote.count({
-                where: {
-                    election: whereClause
-                }
+                where: { election: whereClause }
             }),
-
-            // Total des candidats
             prisma.candidate.count({
-                where: {
-                    election: whereClause
-                }
+                where: { election: whereClause }
             })
         ]);
 
@@ -505,11 +365,7 @@ router.get('/stats/by-type/:type', async (req, res) => {
                     ? (totalVotes / totalElections).toFixed(1)
                     : 0
             },
-            filters: {
-                filiere,
-                annee,
-                ecole
-            },
+            filters: { filiere, annee, ecole },
             lastUpdated: new Date().toISOString()
         });
 
@@ -522,5 +378,55 @@ router.get('/stats/by-type/:type', async (req, res) => {
     }
 });
 
-export default router;
+// FONCTION: Générer les jetons pour une élection
+async function generateVoteTokensForElection(election) {
+    try {
+        let eligibleStudents = [];
 
+        if (election.type === 'SALLE') {
+            eligibleStudents = await prisma.etudiant.findMany({
+                where: {
+                    filiere: election.filiere,
+                    annee: election.annee
+                },
+                include: { user: true }
+            });
+        } else if (election.type === 'ECOLE') {
+            const responsables = await prisma.responsableSalle.findMany({
+                where: { ecole: election.ecole },
+                include: {
+                    etudiant: {
+                        include: { user: true }
+                    }
+                }
+            });
+            eligibleStudents = responsables.map(r => r.etudiant);
+        } else if (election.type === 'UNIVERSITE') {
+            const deleguesEcole = await prisma.delegueEcole.findMany({
+                include: {
+                    responsable: {
+                        include: {
+                            etudiant: {
+                                include: { user: true }
+                            }
+                        }
+                    }
+                }
+            });
+            eligibleStudents = deleguesEcole.map(d => d.responsable.etudiant);
+        }
+
+        console.log(`Génération de ${eligibleStudents.length} jetons pour l'élection ${election.titre}`);
+
+        for (const student of eligibleStudents) {
+            await VoteToken.createToken(student.userId, election.id);
+        }
+
+        console.log('Jetons de vote générés avec succès');
+    } catch (error) {
+        console.error('Erreur lors de la génération des jetons:', error);
+        throw error;
+    }
+}
+
+export default router;
