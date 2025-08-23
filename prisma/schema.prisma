@@ -20,8 +20,6 @@ model User {
   password          String
   role              Role              @default(ADMIN)
   createdAt         DateTime          @default(now())
-
-  // Relations
   etudiant          Etudiant?         @relation("UserToEtudiant")
   admin             Admin?            @relation("UserToAdmin")
   votes             Vote[]
@@ -29,7 +27,7 @@ model User {
   generatedCodes    RegistrationCode[] @relation("UserGeneratedCodes")
   usedRegistrationCode RegistrationCode? @relation("UserUsedCode")
   voteTokens        VoteToken[]
-  activityLogs      ActivityLog[]      @relation("UserActivityLogs")
+  activityLogs      ActivityLog[]     @relation("UserActivityLogs")
 }
 
 model Etudiant {
@@ -42,20 +40,9 @@ model Etudiant {
   filiere         String?
   annee           Int?
   photoUrl        String?
-
+  ecole           String? // Ajout recommandé pour faciliter les filtres
   user            User?   @relation("UserToEtudiant", fields: [userId], references: [id])
   responsableSalle ResponsableSalle[]
-}
-
-model Admin {
-  id      Int    @id @default(autoincrement())
-  userId  Int    @unique
-  nom     String
-  prenom  String
-  poste   String
-  email   String
-
-  user    User   @relation("UserToAdmin", fields: [userId], references: [id])
 }
 
 model Election {
@@ -65,13 +52,12 @@ model Election {
   description String?
   dateDebut   DateTime
   dateFin     DateTime
-  filiere     String?
-  annee       Int?
-  ecole       String?
+  filiere     String?     // Filière concernée (pour niveau 1)
+  annee       Int?        // Année concernée (pour niveau 1)
+  ecole       String?     // École concernée (pour niveau 2)
+  niveau      Int         // Rendu obligatoire : 1, 2 ou 3
+  delegueType DelegueType? // PREMIER ou DEUXIEME (pour niveau 2)
   isActive    Boolean     @default(true)
-  niveau        Int? // 1 = Salle, 2 = École, 3 = Université
-  delegueType   DelegueType? // utile pour les niveaux 2 et 3
-
   
   candidates  Candidate[]
   votes       Vote[]
@@ -86,7 +72,6 @@ model Candidate {
   photoUrl   String?
   userId     Int
   electionId Int
-  
   election   Election  @relation(fields: [electionId], references: [id])
   user       User      @relation(fields: [userId], references: [id])
   votes      Vote[]
@@ -98,13 +83,52 @@ model Vote {
   electionId  Int
   candidateId Int
   createdAt   DateTime  @default(now())
-  poidsVote     Float? // ex: 1.0 pour vote normal, 0.6 ou 0.4 selon le profil
+  poidsVote   Float     // Champ obligatoire et unique source de vérité
 
   user        User      @relation(fields: [userId], references: [id])
   election    Election  @relation(fields: [electionId], references: [id])
   candidate   Candidate @relation(fields: [candidateId], references: [id])
 
   @@unique([userId, electionId])
+}
+
+model ResponsableSalle {
+  id         Int      @id @default(autoincrement())
+  etudiantId Int
+  filiere    String
+  annee      Int
+  ecole      String
+  createdAt  DateTime @default(now())
+
+  etudiant   Etudiant @relation(fields: [etudiantId], references: [id])
+  delegueEcole DelegueEcole[]
+
+  @@unique([etudiantId, annee]) // Contrainte ajoutée
+}
+
+model DelegueEcole {
+  id              Int      @id @default(autoincrement())
+  responsableId   Int
+  typeDelegue     DelegueType
+  ecole           String
+  createdAt       DateTime @default(now())
+
+  responsable     ResponsableSalle @relation(fields: [responsableId], references: [id])
+  delegueUniversitaire DelegueUniversite[]
+
+  @@unique([responsableId, typeDelegue, ecole]) // Contrainte ajoutée
+}
+
+
+model Admin {
+  id      Int    @id @default(autoincrement())
+  userId  Int    @unique
+  nom     String
+  prenom  String
+  poste   String
+  email   String
+
+  user    User   @relation("UserToAdmin", fields: [userId], references: [id])
 }
 
 model RegistrationCode {
@@ -146,37 +170,7 @@ model ActivityLog {
   user      User?    @relation("UserActivityLogs", fields: [userId], references: [id])
 }
 
-model ResponsableSalle {
-  id         Int      @id @default(autoincrement())
-  etudiantId Int
-  filiere    String
-  annee      Int
-  ecole      String
-  createdAt  DateTime @default(now())
 
-  etudiant   Etudiant @relation(fields: [etudiantId], references: [id])
-  delegueEcole DelegueEcole[]
-}
-
-model DelegueEcole {
-  id              Int      @id @default(autoincrement())
-  responsableId   Int
-  typeDelegue     DelegueType
-  ecole           String
-  createdAt       DateTime @default(now())
-
-  responsable     ResponsableSalle @relation(fields: [responsableId], references: [id])
-  delegueUniversitaire DelegueUniversite[]
-}
-
-model DelegueUniversite {
-  id            Int      @id @default(autoincrement())
-  delegueEcoleId Int
-  typeDelegue   DelegueType
-  createdAt     DateTime @default(now())
-
-  delegueEcole  DelegueEcole @relation(fields: [delegueEcoleId], references: [id])
-}
 
 enum DelegueType {
   PREMIER
