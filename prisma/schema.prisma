@@ -179,6 +179,28 @@ model ActivityLog {
 }
 
 
+model Notification {
+  id        String   @id @default(cuid())
+  title     String
+  message   String
+  type      String   // info, warning, success, error, system
+  priority  String   // low, medium, high, urgent
+  read      Boolean  @default(false)
+  relatedEntity String? // election, candidate, vote, user, system
+  entityId  String?
+  
+  // Relations
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([read])
+  @@index([createdAt])
+  @@index([userId, read])
+}
 
 enum DelegueType {
   PREMIER

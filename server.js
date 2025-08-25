@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import prisma from './prisma.js';
 
 // Import des routes
+import notificationRoutes from './routes/notifications.js';
 import activityRouter from './routes/activity.js';
 import adminRouter from './routes/admin.js';
 import adminRegisterRouter from './routes/adminRegister.js';
@@ -55,6 +56,7 @@ app.get('/api/health', (req, res) => {
 // ============================================================
 
 // Routes API avec préfixe /api
+app.use('/api/notifications', notificationRoutes);
 app.use('/api/adminRegister', adminRegisterRouter);
 app.use('/api/adminLogin', adminLoginRouter);
 app.use('/api/admin', adminRouter);
