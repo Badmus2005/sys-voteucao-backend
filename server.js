@@ -46,13 +46,23 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ==================== ROUTE HEALTH CHECK ====================
-app.get('/api/health', (req, res) => {
-    res.status(200).json({
-        status: 'OK',
-        message: 'Service is healthy',
-        timestamp: new Date().toISOString()
-    });
+aapp.get('/api/health', async (req, res) => {
+    try {
+        await prisma.$queryRaw`SELECT 1`; // Vérifie la connexion DB
+        res.status(200).json({
+            status: 'OK',
+            message: 'Service is healthy',
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        res.status(503).json({
+            status: 'ERROR',
+            message: 'Database not reachable',
+            details: error.message
+        });
+    }
 });
+
 // ============================================================
 
 // Routes API avec préfixe /api
