@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import nodemailer from 'nodemailer';
 import prisma from '../prisma.js';
 import { authenticateToken } from '../middlewares/auth.js';
+import { PasswordResetService } from '../services/passwordResetService.js';
 
 const router = express.Router();
 
@@ -16,35 +17,205 @@ const transporter = nodemailer.createTransport({
     }
 });
 
-// Route de connexion (existante)
+// Route de connexion (modifiée pour gérer les identifiants temporaires)
 router.post('/', async (req, res) => {
     try {
-        const { email, password } = req.body;
+        const { email, password, identifiantTemporaire } = req.body;
 
-        if (!email || !password)
+        // Connexion avec identifiants temporaires
+        if (identifiantTemporaire) {
+            return handleTemporaryLogin(req, res);
+        }
+
+        // Connexion normale avec email
+        if (!email || !password) {
             return res.status(400).json({ message: 'Email et mot de passe requis' });
+        }
 
-        // Trouver user ETUDIANT par email
-        const user = await prisma.user.findUnique({ where: { email } });
-        if (!user || user.role !== 'ETUDIANT') {
-            return res.status(400).json({ message: 'Utilisateur non trouvé ou rôle invalide' });
+        // Trouver user par email
+        const user = await prisma.user.findUnique({
+            where: { email },
+            include: {
+                etudiant: true,
+                admin: true
+            }
+        });
+
+        if (!user) {
+            return res.status(400).json({ message: 'Utilisateur non trouvé' });
         }
 
         const validPassword = await bcrypt.compare(password, user.password);
-        if (!validPassword)
+        if (!validPassword) {
             return res.status(400).json({ message: 'Mot de passe incorrect' });
+        }
 
         // Générer JWT
         const token = jwt.sign(
-            { id: user.id, role: user.role },
+            {
+                id: user.id,
+                role: user.role,
+                requirePasswordChange: user.requirePasswordChange
+            },
             process.env.JWT_SECRET,
             { expiresIn: '8h' }
         );
 
-        res.json({ message: 'Connexion réussie', token });
+        // Préparer la réponse
+        const response = {
+            message: 'Connexion réussie',
+            token,
+            user: {
+                id: user.id,
+                email: user.email,
+                role: user.role,
+                requirePasswordChange: user.requirePasswordChange
+            }
+        };
+
+        // Ajouter les informations spécifiques selon le rôle
+        if (user.role === 'ETUDIANT' && user.etudiant) {
+            response.user.etudiant = {
+                id: user.etudiant.id,
+                nom: user.etudiant.nom,
+                prenom: user.etudiant.prenom,
+                matricule: user.etudiant.matricule,
+                filiere: user.etudiant.filiere,
+                annee: user.etudiant.annee
+            };
+        }
+
+        if (user.role === 'ADMIN' && user.admin) {
+            response.user.admin = {
+                id: user.admin.id,
+                nom: user.admin.nom,
+                prenom: user.admin.prenom,
+                poste: user.admin.poste
+            };
+        }
+
+        res.json(response);
+
     } catch (error) {
         console.error(error);
         res.status(500).json({ message: 'Erreur serveur' });
+    }
+});
+
+// Gestion de la connexion avec identifiants temporaires
+const handleTemporaryLogin = async (req, res) => {
+    try {
+        const { identifiantTemporaire, password } = req.body;
+
+        if (!identifiantTemporaire || !password) {
+            return res.status(400).json({ message: 'Identifiant temporaire et mot de passe requis' });
+        }
+
+        const student = await PasswordResetService.validateTemporaryCredentials(
+            identifiantTemporaire,
+            password
+        );
+
+        // Générer un token avec flag de changement requis
+        const token = jwt.sign(
+            {
+                id: student.user.id,
+                email: student.user.email,
+                role: student.user.role,
+                requirePasswordChange: true
+            },
+            process.env.JWT_SECRET,
+            { expiresIn: '1h' } // Token court pour changement de mot de passe
+        );
+
+        res.json({
+            message: 'Connexion temporaire réussie - Changement de mot de passe requis',
+            token,
+            requirePasswordChange: true,
+            user: {
+                id: student.user.id,
+                email: student.user.email,
+                role: student.user.role,
+                requirePasswordChange: true,
+                etudiant: {
+                    id: student.id,
+                    nom: student.nom,
+                    prenom: student.prenom,
+                    matricule: student.matricule,
+                    filiere: student.filiere,
+                    annee: student.annee
+                }
+            }
+        });
+    } catch (error) {
+        res.status(401).json({
+            message: error.message
+        });
+    }
+};
+
+// Nouvelle route pour changement de mot de passe après réinitialisation
+router.post('/change-password-temporary', authenticateToken, async (req, res) => {
+    try {
+        const { newPassword, confirmPassword, currentPassword } = req.body;
+
+        // Validation des données
+        if (!newPassword || !confirmPassword || !currentPassword) {
+            return res.status(400).json({ message: 'Tous les champs sont requis' });
+        }
+
+        if (newPassword !== confirmPassword) {
+            return res.status(400).json({ message: 'Les mots de passe ne correspondent pas' });
+        }
+
+        if (newPassword.length < 8) {
+            return res.status(400).json({
+                message: 'Le mot de passe doit contenir au moins 8 caractères'
+            });
+        }
+
+        // Vérifier que l'utilisateur a besoin de changer son mot de passe
+        const user = await prisma.user.findUnique({
+            where: { id: req.user.id },
+            select: { id: true, tempPassword: true, role: true, requirePasswordChange: true }
+        });
+
+        if (!user || !user.requirePasswordChange) {
+            return res.status(400).json({ message: 'Changement de mot de passe non requis' });
+        }
+
+        // Vérifier le mot de passe temporaire actuel
+        const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.tempPassword || '');
+        if (!isCurrentPasswordValid) {
+            return res.status(401).json({ message: 'Mot de passe temporaire incorrect' });
+        }
+
+        // Changer le mot de passe
+        await PasswordResetService.completePasswordReset(user.id, newPassword);
+
+        // Régénérer le token sans le flag de changement
+        const newToken = jwt.sign(
+            {
+                id: user.id,
+                role: user.role,
+                requirePasswordChange: false
+            },
+            process.env.JWT_SECRET,
+            { expiresIn: '8h' }
+        );
+
+        res.json({
+            success: true,
+            message: 'Mot de passe changé avec succès',
+            token: newToken,
+            requirePasswordChange: false
+        });
+
+    } catch (error) {
+        console.error('Erreur changement mot de passe temporaire:', error);
+        res.status(500).json({
+            message: 'Erreur lors du changement de mot de passe'
+        });
     }
 });
 

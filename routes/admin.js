@@ -1,6 +1,8 @@
 import express from 'express';
 import prisma from '../prisma.js';
-import { authenticateToken } from '../middlewares/auth.js';
+import { authenticateToken, requireAdmin } from '../middlewares/auth.js';
+import { resetStudentAccess, getStudentByMatricule, getAllStudents } from '../controllers/adminController.js';
+import express from 'express';
 
 const router = express.Router();
 
@@ -61,5 +63,28 @@ router.put('/update', authenticateToken, async (req, res) => {
         res.status(500).json({ message: "Erreur lors de la mise à jour" });
     }
 });
+
+
+
+// Route pour réinitialiser les accès d'un étudiant
+router.post('/students/:studentId/reset-access',
+    authenticateToken,
+    requireAdmin,
+    resetStudentAccess
+);
+
+// Route pour rechercher un étudiant par matricule
+router.get('/students/search/:matricule',
+    authenticateToken,
+    requireAdmin,
+    getStudentByMatricule
+);
+
+// Route pour lister tous les étudiants (avec pagination et recherche)
+router.get('/students',
+    authenticateToken,
+    requireAdmin,
+    getAllStudents
+);
 
 export default router;

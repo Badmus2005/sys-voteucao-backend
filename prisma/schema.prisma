@@ -20,6 +20,9 @@ model User {
   password          String
   role              Role              @default(ADMIN)
   createdAt         DateTime          @default(now())
+  tempPassword          String?                            // Mot de passe temporaire
+  requirePasswordChange Boolean @default(false)           // Force le changement au prochain login
+  passwordResetExpires  DateTime?                        // Date d'expiration du mot de passe temporaire
   etudiant          Etudiant?         @relation("UserToEtudiant")
   admin             Admin?            @relation("UserToAdmin")
   votes             Vote[]
@@ -36,7 +39,7 @@ model Etudiant {
   userId          Int?    @unique
   matricule       String? @unique
   codeInscription String? @unique
-  identifiant     String? @unique
+  identifiantTemporaire String? @unique    // Identifiant temporaire pour réinitialisatio
   nom             String?
   prenom          String?
   filiere         String?

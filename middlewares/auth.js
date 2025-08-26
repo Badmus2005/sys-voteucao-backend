@@ -38,6 +38,7 @@ export const authenticateToken = async (req, res, next) => {
             id: user.id,
             email: user.email,
             role: user.role,
+            requirePasswordChange: user.requirePasswordChange,
             etudiant: user.etudiant,
             admin: user.admin
         };
@@ -199,21 +200,13 @@ export const checkOwnership = (resourceType) => {
 };
 
 // Middleware pour vérifier si le changement de mot de passe est requis
-export const checkPasswordChange = async (req, res, next) => {
-    try {
-        const user = await prisma.user.findUnique({
-            where: { id: req.user.id }
+export const checkPasswordChange = (req, res, next) => {
+    if (req.user.requirePasswordChange && req.path !== '/change-password') {
+        return res.status(403).json({
+            message: 'Vous devez changer votre mot de passe avant de continuer',
+            code: 'PASSWORD_CHANGE_REQUIRED',
+            requirePasswordChange: true
         });
-
-        if (user.requirePasswordChange && req.path !== '/change-password') {
-            return res.status(403).json({
-                message: 'Vous devez changer votre mot de passe avant de continuer',
-                code: 'PASSWORD_CHANGE_REQUIRED'
-            });
-        }
-
-        next();
-    } catch (error) {
-        next(error);
     }
+    next();
 };
