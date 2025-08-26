@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import prisma from './prisma/client.js';
 
 // Import des routes
 import notificationRoutes from './routes/notifications.js';
@@ -45,7 +46,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ==================== ROUTE HEALTH CHECK ====================
-app.get('/api/health', (_req, res) => {
+app.get('/api/health', (req, res) => {
     res.status(200).json({
         status: 'OK',
         message: 'Service is healthy',
@@ -75,7 +76,7 @@ app.use('/api/activity', activityRouter);
 // Route de test
 app.get('/api/test', (_req, res) => {
     res.json({
-        message: '🚀 API Vote UCAO opérationnelle',
+        message: ' API Vote UCAO opérationnelle',
         version: '2.0.0',
         timestamp: new Date().toISOString(),
         environment: process.env.NODE_ENV || 'development'
