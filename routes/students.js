@@ -76,6 +76,22 @@ router.get('/stats', authenticateToken, async (req, res) => {
 
         const ids = etudiantsValides.map(e => e.id);
 
+        if (ids.length === 0) {
+            return res.json({
+                statistics: {
+                    totalStudents: 0,
+                    activeStudents: 0,
+                    inactiveStudents: 0,
+                    activationRate: '0.00'
+                },
+                byFiliere: [],
+                byAnnee: [],
+                byEcole: [],
+                lastUpdated: new Date().toISOString()
+            });
+        }
+
+
         // Requêtes parallèles
         const [
             totalStudents,
