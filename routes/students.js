@@ -56,8 +56,8 @@ router.get('/stats', authenticateToken, async (req, res) => {
     try {
         const { filiere, annee, ecole } = req.query;
 
-        // Construction de la clause WHERE avec relations Prisma
-        const baseWhere = {
+        // Filtrage principal avec relations Prisma
+        const filterWithUser = {
             ...(filiere && { filiere }),
             ...(annee && { annee: parseInt(annee) }),
             ...(ecole && { ecole }),
@@ -68,6 +68,14 @@ router.get('/stats', authenticateToken, async (req, res) => {
             }
         };
 
+        // Récupérer les IDs des étudiants valides
+        const etudiantsValides = await prisma.etudiant.findMany({
+            where: filterWithUser,
+            select: { id: true }
+        });
+
+        const ids = etudiantsValides.map(e => e.id);
+
         // Requêtes parallèles
         const [
             totalStudents,
@@ -77,52 +85,41 @@ router.get('/stats', authenticateToken, async (req, res) => {
             studentsByAnnee,
             studentsByEcole
         ] = await Promise.all([
-            prisma.etudiant.count({ where: baseWhere }),
+            Promise.resolve(ids.length),
 
             prisma.etudiant.count({
                 where: {
-                    ...baseWhere,
-                    user: {
-                        is: {
-                            role: 'ETUDIANT',
-                            actif: true
-                        }
-                    }
+                    id: { in: ids },
+                    user: { is: { actif: true } }
                 }
             }),
 
             prisma.etudiant.count({
                 where: {
-                    ...baseWhere,
-                    user: {
-                        is: {
-                            role: 'ETUDIANT',
-                            actif: false
-                        }
-                    }
+                    id: { in: ids },
+                    user: { is: { actif: false } }
                 }
             }),
 
             prisma.etudiant.groupBy({
                 by: ['filiere'],
                 _count: { _all: true },
-                where: baseWhere
+                where: { id: { in: ids } }
             }),
 
             prisma.etudiant.groupBy({
                 by: ['annee'],
                 _count: { _all: true },
-                where: baseWhere
+                where: { id: { in: ids } }
             }),
 
             prisma.etudiant.groupBy({
                 by: ['ecole'],
                 _count: { _all: true },
-                where: baseWhere
+                where: { id: { in: ids } }
             })
         ]);
 
-        // Réponse structurée
         res.json({
             statistics: {
                 totalStudents,
@@ -130,7 +127,7 @@ router.get('/stats', authenticateToken, async (req, res) => {
                 inactiveStudents,
                 activationRate: totalStudents > 0
                     ? ((activeStudents / totalStudents) * 100).toFixed(2)
-                    : 0
+                    : '0.00'
             },
             byFiliere: studentsByFiliere,
             byAnnee: studentsByAnnee,
@@ -138,13 +135,14 @@ router.get('/stats', authenticateToken, async (req, res) => {
             lastUpdated: new Date().toISOString()
         });
     } catch (error) {
-        console.error('Error fetching student statistics:', error);
+        console.error('Erreur stats étudiants:', error);
         res.status(500).json({
             message: 'Erreur serveur lors de la récupération des statistiques',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 });
+
 
 
 // Route pour réinitialiser les accès d'un étudiant
