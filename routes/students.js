@@ -6,84 +6,11 @@ import { authenticateToken } from '../middlewares/auth.js';
 const router = express.Router();
 
 // GET /api/students - Récupérer tous les étudiants avec pagination et filtres
-router.get('/', authenticateToken, async (req, res) => {
-    try {
-        const { page = 1, limit = 10, filiere, annee, status, search, ecole } = req.query;
-        const skip = (parseInt(page) - 1) * parseInt(limit);
-        const take = parseInt(limit);
-
-        // Construction de la clause WHERE
-        let whereClause = {
-            user: {
-                role: 'ETUDIANT'
-            }
-        };
-
-        // Filtres
-        if (filiere && filiere !== 'all') {
-            whereClause.filiere = filiere;
-        }
-
-        if (annee && annee !== 'all') {
-            whereClause.annee = parseInt(annee);
-        }
-
-        if (status && status !== 'all') {
-            whereClause.user = {
-                ...whereClause.user,
-                actif: status === 'active'
-            };
-        }
-
-        if (ecole && ecole !== 'all') {
-            whereClause.ecole = ecole;
-        }
-
-        // Recherche
-        if (search) {
-            whereClause.OR = [
-                { nom: { contains: search, mode: 'insensitive' } },
-                { prenom: { contains: search, mode: 'insensitive' } },
-                { matricule: { contains: search, mode: 'insensitive' } },
-                { codeInscription: { contains: search, mode: 'insensitive' } },
-                { user: { email: { contains: search, mode: 'insensitive' } } }
-            ];
-        }
-
-        const [students, total] = await Promise.all([
-            prisma.etudiant.findMany({
-                where: whereClause,
-                include: {
-                    user: {
-                        select: {
-                            id: true,
-                            email: true,
-                            actif: true,
-                            role: true
-                        }
-                    }
-                },
-                orderBy: { nom: 'asc' },
-                skip,
-                take
-            }),
-            prisma.etudiant.count({ where: whereClause })
-        ]);
-
-        res.json({
-            students,
-            total,
-            page: parseInt(page),
-            totalPages: Math.ceil(total / parseInt(limit))
-        });
-    } catch (error) {
-        console.error('Error fetching students:', error);
-        res.status(500).json({
-            message: 'Erreur serveur lors de la récupération des étudiants',
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
-        });
-    }
-});
+router.get('/',
+    authenticateToken,
+    requireAdmin,
+    getAllStudents
+);
 
 // PUT /api/students/:id/status - Modifier le statut d'un étudiant
 router.put('/:id/status', authenticateToken, async (req, res) => {
@@ -219,71 +146,26 @@ router.get('/stats', authenticateToken, async (req, res) => {
 });
 
 
-// Route de réinitialisation finale
-router.post('/:id/reset-credentials', authenticateToken, async (req, res) => {
-    try {
-        const { id } = req.params;
+// Route pour réinitialiser les accès d'un étudiant
+router.post('/:studentId/reset-access',
+    authenticateToken,
+    requireAdmin,
+    resetStudentAccess
+);
 
-        // Vérifier admin
-        const adminUser = await prisma.user.findUnique({
-            where: { id: req.user.id },
-            include: { admin: true }
-        });
+// Route pour rechercher un étudiant par matricule (années supérieures)
+router.get('/matricule/:matricule',
+    authenticateToken,
+    requireAdmin,
+    getStudentByMatricule
+);
 
-        if (!adminUser || adminUser.role !== 'ADMIN') {
-            return res.status(403).json({ message: 'Accès refusé' });
-        }
+// Route pour rechercher un étudiant par code d'inscription (1ère année)
+router.get('/code/:code',
+    authenticateToken,
+    requireAdmin,
+    getStudentByCodeInscription
+);
 
-        // Récupérer l'étudiant
-        const etudiant = await prisma.etudiant.findUnique({
-            where: { userId: parseInt(id) },
-            include: { user: true }
-        });
-
-        if (!etudiant) {
-            return res.status(404).json({ message: 'Étudiant non trouvé' });
-        }
-
-        // GÉNÉRER NOUVEAUX IDENTIFIANTS
-        const newEmail = `etu.${etudiant.matricule}@ucao.edu`;
-        const newPassword = generateTempPassword();
-        const hashedPassword = await bcrypt.hash(newPassword, 12);
-
-        // METTRE À JOUR LE COMPTE
-        await prisma.user.update({
-            where: { id: parseInt(id) },
-            data: {
-                email: newEmail,
-                password: hashedPassword,
-                tempPassword: newPassword, // Stocker temporairement
-                requirePasswordChange: true, // Forcer changement
-                actif: true // Réactiver si désactivé
-            }
-        });
-
-        // RÉPONSE
-        res.json({
-            success: true,
-            message: 'Identifiants réinitialisés avec succès',
-            credentials: {
-                login: newEmail,
-                password: newPassword,
-                message: 'À changer à la première connexion'
-            },
-            student: {
-                nom: etudiant.nom,
-                prenom: etudiant.prenom,
-                matricule: etudiant.matricule
-            }
-        });
-
-    } catch (error) {
-        console.error('Error:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Erreur lors de la réinitialisation'
-        });
-    }
-});
 
 export default router;

@@ -65,33 +65,4 @@ router.put('/update', authenticateToken, async (req, res) => {
 });
 
 
-
-// Route pour réinitialiser les accès d'un étudiant
-router.post('/students/:studentId/reset-access',
-    authenticateToken,
-    requireAdmin,
-    resetStudentAccess
-);
-
-// Route pour rechercher un étudiant par matricule (années supérieures)
-router.get('/students/matricule/:matricule',
-    authenticateToken,
-    requireAdmin,
-    getStudentByMatricule
-);
-
-// Route pour rechercher un étudiant par code d'inscription (1ère année)
-router.get('/students/code/:code',
-    authenticateToken,
-    requireAdmin,
-    getStudentByCodeInscription
-);
-
-// Route pour lister tous les étudiants
-router.get('/students',
-    authenticateToken,
-    requireAdmin,
-    getAllStudents
-);
-
 export default router;

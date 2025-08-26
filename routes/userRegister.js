@@ -3,9 +3,15 @@ import bcrypt from 'bcrypt';
 import prisma from '../prisma.js';
 
 const router = express.Router();
-// Fonction pour générer un email étudiant automatique
-const generateStudentEmail = (matricule) => {
-  return `etu.${matricule}@ucao.edu`;
+
+// Fonction pour générer un identifiant temporaire
+const generateTemporaryIdentifiant = () => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let identifiant = '';
+  for (let i = 0; i < 8; i++) {
+    identifiant += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return `TEMP${identifiant}`;
 };
 
 // Fonction pour générer un mot de passe temporaire
@@ -17,41 +23,6 @@ const generateTempPassword = () => {
   }
   return password;
 };
-
-// Fonction pour générer un matricule automatique si besoin
-const generateMatricule = (filiere, annee) => {
-  const prefixMap = {
-    'Informatique de Gestion': 'IDG',
-    'Droit': 'DRT',
-    'Medecine': 'MED',
-    'Électronique': 'ELEC',
-    'Génie Télécoms et TIC': 'GTIC',
-    'Informatique Industrielle et Maintenance': 'IIM',
-    'Electrotechnique': 'ELT',
-    'Assurances': 'ASS',
-    'Banque et Finance d\'Entreprise': 'BFE',
-    'Audit et Contrôle de Gestion': 'ACG',
-    'Management des Ressources Humaines': 'MRH',
-    'Action Commerciale et Force de Vente': 'ACFV',
-    'Communication et Action Publicitaire': 'CAP',
-    'Commerce': 'COM',
-    'Informatique de Gestion': 'IG',
-    'Transport et Logistique': 'TL',
-    'Gestion de l\'Environnement et Aménagement du Territoire': 'GEAT',
-    'Production et Gestion des Ressources Animales': 'PGRA',
-    'Sciences et Techniques de Production Végétale': 'STPV',
-    'Stockage Conservation et Conditionnement des Produits Agricoles': 'SCPA',
-    'Gestion des Entreprises Rurales et Agricoles': 'GERA',
-    'Economie': 'ECO'
-  };
-
-  const prefix = prefixMap[filiere] || 'ETU';
-  const year = new Date().getFullYear().toString().slice(-2);
-  const random = Math.floor(1000 + Math.random() * 9000); // 1000-9999
-
-  return `${prefix}${year}${annee}${random}`;
-};
-
 
 // Fonctions de validation intégrées
 const validateEmail = (email) => {
@@ -157,7 +128,7 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // 1ère année - validation par code + génération automatique
+    // 1ère année - validation par code + identifiant temporaire
     if (anneeInt === 1) {
       if (!code) {
         return res.status(400).json({
@@ -175,20 +146,17 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
         });
       }
 
-      // GÉNÉRER INDENTIFIANT AUTOMATIQUE pour 1ère année
-      const generatedIdentifiant = generateMatricule(filiere, anneeInt);
-
-      // GÉNÉRER EMAIL et MOT DE PASSE
-      const email = generateStudentEmail(generatedIdentifiant);
+      // GÉNÉRER IDENTIFIANT TEMPORAIRE pour 1ère année
+      const temporaryIdentifiant = generateTemporaryIdentifiant();
       const tempPassword = generateTempPassword();
-      const hashedPassword = await bcrypt.hash(tempPassword, 10);
+      const hashedTempPassword = await bcrypt.hash(tempPassword, 10);
 
       try {
         const createdUser = await prisma.$transaction(async (tx) => {
           const user = await tx.user.create({
             data: {
               email,
-              password: hashedPassword,
+              password: hashedTempPassword,
               role: 'ETUDIANT',
               tempPassword: tempPassword,
               requirePasswordChange: true,
@@ -196,10 +164,11 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
                 create: {
                   nom,
                   prenom,
-                  identifiant: generatedIdentifiant, // Matricule généré automatiquement
+                  identifiantTemporaire: temporaryIdentifiant, // Identifiant temporaire
                   filiere,
                   annee: anneeInt,
-                  codeInscription: code
+                  codeInscription: code,
+                  matricule: null // Pas de matricule pour 1ère année
                 }
               }
             },
@@ -217,7 +186,7 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
         logger.info('Nouvel étudiant inscrit (1ère année)', {
           userId: createdUser.id,
           email: createdUser.email,
-          identifiant: createdUser.etudiant.identifiant
+          identifiantTemporaire: createdUser.etudiant.identifiantTemporaire
         });
 
         return res.status(201).json({
@@ -228,14 +197,14 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
               id: createdUser.id,
               nom: createdUser.etudiant.nom,
               prenom: createdUser.etudiant.prenom,
-              identifiant: createdUser.etudiant.identifiant,
+              identifiantTemporaire: createdUser.etudiant.identifiantTemporaire,
               filiere: createdUser.etudiant.filiere,
               annee: createdUser.etudiant.annee
             },
             temporaryCredentials: {
-              email: email,
+              identifiant: temporaryIdentifiant,
               password: tempPassword,
-              message: 'Conservez ces identifiants pour votre première connexion'
+              message: 'Conservez ces identifiants temporaires pour votre première connexion'
             }
           }
         });
@@ -276,18 +245,16 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
           });
         }
 
-        // GÉNÉRER EMAIL et MOT DE PASSE pour années supérieures
-        const generatedIdentifiant = generateMatricule(filiere, anneeInt);
-
-        const email = generateStudentEmail(generatedIdentifiant);
+        // GÉNÉRER IDENTIFIANT TEMPORAIRE pour années supérieures
+        const temporaryIdentifiant = generateTemporaryIdentifiant();
         const tempPassword = generateTempPassword();
-        const hashedPassword = await bcrypt.hash(tempPassword, 10);
+        const hashedTempPassword = await bcrypt.hash(tempPassword, 10);
 
         const createdUser = await prisma.$transaction(async (tx) => {
           const user = await tx.user.create({
             data: {
               email,
-              password: hashedPassword,
+              password: hashedTempPassword,
               role: 'ETUDIANT',
               tempPassword: tempPassword,
               requirePasswordChange: true
@@ -300,8 +267,10 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
               userId: user.id,
               nom,
               prenom,
+              identifiantTemporaire: temporaryIdentifiant, // Identifiant temporaire
               filiere,
-              annee: anneeInt
+              annee: anneeInt,
+              codeInscription: null // Pas de code d'inscription pour années supérieures
             }
           });
 
@@ -323,13 +292,14 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
               nom,
               prenom,
               matricule,
+              identifiantTemporaire: temporaryIdentifiant,
               filiere,
               annee: anneeInt
             },
             temporaryCredentials: {
-              email: email,
+              identifiant: temporaryIdentifiant,
               password: tempPassword,
-              message: 'Utilisez ces identifiants pour votre première connexion'
+              message: 'Utilisez ces identifiants temporaires pour votre première connexion'
             }
           }
         });
