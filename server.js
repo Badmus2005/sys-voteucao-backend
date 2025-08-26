@@ -3,7 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import prisma from './prisma/client.js';
+import prisma from '../prisma.js'
 
 // Import des routes
 import notificationRoutes from './routes/notifications.js';
