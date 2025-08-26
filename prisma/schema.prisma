@@ -36,12 +36,13 @@ model Etudiant {
   userId          Int?    @unique
   matricule       String? @unique
   codeInscription String? @unique
+  identifiant     String? @unique
   nom             String?
   prenom          String?
   filiere         String?
   annee           Int?
   photoUrl        String?
-  ecole           String? // Ajout recommandé pour faciliter les filtres
+  ecole           String? s
   user            User?   @relation("UserToEtudiant", fields: [userId], references: [id])
   responsableSalle ResponsableSalle[]
 }
