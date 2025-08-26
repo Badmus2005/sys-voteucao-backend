@@ -3,7 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import prisma from '../prisma.js'
+import prisma from './prisma.js'
 
 // Import des routes
 import notificationRoutes from './routes/notifications.js';
@@ -46,7 +46,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ==================== ROUTE HEALTH CHECK ====================
-aapp.get('/api/health', async (req, res) => {
+app.get('/api/health', async (req, res) => {
     try {
         await prisma.$queryRaw`SELECT 1`; // Vérifie la connexion DB
         res.status(200).json({
