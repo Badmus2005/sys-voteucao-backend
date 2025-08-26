@@ -1,5 +1,6 @@
 import express from 'express';
 import prisma from '../prisma.js';
+import bcrypt from 'bcrypt';
 import { authenticateToken } from '../middlewares/auth.js';
 
 const router = express.Router();
