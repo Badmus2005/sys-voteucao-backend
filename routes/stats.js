@@ -45,11 +45,22 @@ router.get('/general', authenticateToken, async (req, res) => {
         const avgVoteTime = await calculateAverageVoteTime(electionIdInt, startDate);
 
         res.json({
-            totalUsers,
-            totalVotes,
-            totalElections,
-            totalCandidates,
-            participationRate: participationData.rate,
+            users: {
+                total: totalUsers,
+                percent: participationData.userPercent || 0
+            },
+            votes: {
+                total: totalVotes,
+                percent: participationData.votePercent || 0
+            },
+            candidates: {
+                total: totalCandidates,
+                percent: participationData.candidatePercent || 0
+            },
+            elections: {
+                active: totalElections,
+                percent: participationData.electionPercent || 0
+            },
             avgVoteTime,
             lastUpdated: new Date().toISOString()
         });
@@ -61,6 +72,7 @@ router.get('/general', authenticateToken, async (req, res) => {
         });
     }
 });
+
 
 
 /**
