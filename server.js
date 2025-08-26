@@ -3,7 +3,6 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import prisma from './prisma.js';
 
 // Import des routes
 import notificationRoutes from './routes/notifications.js';
@@ -46,7 +45,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ==================== ROUTE HEALTH CHECK ====================
-app.get('/api/health', (req, res) => {
+app.get('/api/health', (_req, res) => {
     res.status(200).json({
         status: 'OK',
         message: 'Service is healthy',
@@ -74,7 +73,7 @@ app.use('/api/stats', statsRouter);
 app.use('/api/activity', activityRouter);
 
 // Route de test
-app.get('/api/test', (req, res) => {
+app.get('/api/test', (_req, res) => {
     res.json({
         message: '🚀 API Vote UCAO opérationnelle',
         version: '2.0.0',
@@ -92,8 +91,8 @@ app.use('/api/*', (req, res) => {
 });
 
 // Middleware de gestion d'erreurs global
-app.use((err, req, res, next) => {
-    console.error('💥 Erreur serveur:', err);
+app.use((err, _req, res) => {
+    console.error('Erreur serveur:', err);
 
     res.status(err.status || 500).json({
         message: process.env.NODE_ENV === 'production'
@@ -107,8 +106,8 @@ const PORT = process.env.PORT || 5000;
 const HOST = process.env.HOST || '0.0.0.0';
 
 app.listen(PORT, HOST, () => {
-    console.log(`🚀 Serveur Vote UCAO démarré sur http://${HOST}:${PORT}`);
-    console.log(`📊 Mode: ${process.env.NODE_ENV || 'development'}`);
-    console.log(`🔗 API disponible sur: http://${HOST}:${PORT}/api`);
-    console.log(`🏥 Health check: http://${HOST}:${PORT}/api/health`);
+    console.log(` Serveur Vote UCAO démarré sur http://${HOST}:${PORT}`);
+    console.log(` Mode: ${process.env.NODE_ENV || 'development'}`);
+    console.log(` API disponible sur: http://${HOST}:${PORT}/api`);
+    console.log(` Health check: http://${HOST}:${PORT}/api/health`);
 });
