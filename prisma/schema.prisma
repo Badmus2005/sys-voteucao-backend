@@ -42,7 +42,7 @@ model Etudiant {
   filiere         String?
   annee           Int?
   photoUrl        String?
-  ecole           String? s
+  ecole           String? 
   user            User?   @relation("UserToEtudiant", fields: [userId], references: [id])
   responsableSalle ResponsableSalle[]
 }
