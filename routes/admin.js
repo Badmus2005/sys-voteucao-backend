@@ -1,7 +1,7 @@
 import express from 'express';
 import prisma from '../prisma.js';
 import { authenticateToken, requireAdmin } from '../middlewares/auth.js';
-import { resetStudentAccess, getStudentByMatricule, getAllStudents } from '../controllers/adminController.js';
+import { resetStudentAccess, getStudentByMatricule, getStudentByCodeInscription, getAllStudents } from '../controllers/adminController.js';
 
 
 const router = express.Router();
@@ -73,14 +73,21 @@ router.post('/students/:studentId/reset-access',
     resetStudentAccess
 );
 
-// Route pour rechercher un étudiant par matricule
-router.get('/students/search/:matricule',
+// Route pour rechercher un étudiant par matricule (années supérieures)
+router.get('/students/matricule/:matricule',
     authenticateToken,
     requireAdmin,
     getStudentByMatricule
 );
 
-// Route pour lister tous les étudiants (avec pagination et recherche)
+// Route pour rechercher un étudiant par code d'inscription (1ère année)
+router.get('/students/code/:code',
+    authenticateToken,
+    requireAdmin,
+    getStudentByCodeInscription
+);
+
+// Route pour lister tous les étudiants
 router.get('/students',
     authenticateToken,
     requireAdmin,
