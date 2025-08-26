@@ -14,7 +14,17 @@ export const resetStudentAccess = async (req, res) => {
         res.json({
             success: true,
             message: 'Accès réinitialisés avec succès',
-            data: temporaryCredentials
+            data: {
+                temporaryIdentifiant: temporaryCredentials.temporaryIdentifiant,
+                temporaryPassword: temporaryCredentials.temporaryPassword,
+                expirationDate: temporaryCredentials.expirationDate,
+                student: {
+                    id: temporaryCredentials.student.id,
+                    nom: temporaryCredentials.student.nom,
+                    prenom: temporaryCredentials.student.prenom,
+                    matricule: temporaryCredentials.student.matricule // Matricule permanent
+                }
+            }
         });
     } catch (error) {
         console.error('Erreur réinitialisation accès:', error);
@@ -25,6 +35,7 @@ export const resetStudentAccess = async (req, res) => {
     }
 };
 
+// Rechercher par matricule (pour les années supérieures)
 export const getStudentByMatricule = async (req, res) => {
     try {
         const { matricule } = req.params;
@@ -56,6 +67,38 @@ export const getStudentByMatricule = async (req, res) => {
     }
 };
 
+// Rechercher par code d'inscription (pour 1ère année)
+export const getStudentByCodeInscription = async (req, res) => {
+    try {
+        const { code } = req.params;
+
+        const student = await prisma.etudiant.findUnique({
+            where: { codeInscription: code },
+            include: {
+                user: true
+            }
+        });
+
+        if (!student) {
+            return res.status(404).json({
+                success: false,
+                message: 'Étudiant non trouvé avec ce code d\'inscription'
+            });
+        }
+
+        res.json({
+            success: true,
+            data: student
+        });
+    } catch (error) {
+        console.error('Erreur recherche étudiant par code:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+};
+
 export const getAllStudents = async (req, res) => {
     try {
         const { page = 1, limit = 10, search = '' } = req.query;
@@ -64,7 +107,8 @@ export const getAllStudents = async (req, res) => {
             OR: [
                 { nom: { contains: search, mode: 'insensitive' } },
                 { prenom: { contains: search, mode: 'insensitive' } },
-                { matricule: { contains: search, mode: 'insensitive' } },
+                { matricule: { contains: search, mode: 'insensitive' } }, // Recherche par matricule
+                { codeInscription: { contains: search, mode: 'insensitive' } }, // Recherche par code
                 { filiere: { contains: search, mode: 'insensitive' } }
             ]
         } : {};

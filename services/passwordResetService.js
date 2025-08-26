@@ -34,7 +34,7 @@ export class PasswordResetService {
                     }
                 });
 
-                // Mettre à jour l'étudiant
+                // Mettre à jour l'étudiant avec identifiantTemporaire
                 const updated = await tx.etudiant.update({
                     where: { id: studentId },
                     data: {
@@ -64,7 +64,7 @@ export class PasswordResetService {
                 student: {
                     nom: updatedStudent.nom,
                     prenom: updatedStudent.prenom,
-                    matricule: updatedStudent.matricule
+                    matricule: updatedStudent.matricule // Utiliser le matricule permanent
                 }
             };
 
