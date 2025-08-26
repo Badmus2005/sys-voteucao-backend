@@ -11,11 +11,9 @@ const router = express.Router();
 router.get('/general', authenticateToken, async (req, res) => {
     try {
         const { period = '30', electionId } = req.query;
-
-        // Calcul des dates en fonction de la période
         const startDate = calculateStartDate(parseInt(period));
+        const electionIdInt = electionId ? parseInt(electionId) : undefined;
 
-        // Statistiques générales
         const [totalUsers, totalVotes, totalElections, totalCandidates] = await Promise.all([
             prisma.user.count({
                 where: {
@@ -24,8 +22,8 @@ router.get('/general', authenticateToken, async (req, res) => {
                 }
             }),
             prisma.vote.count({
-                where: electionId ? {
-                    electionId: parseInt(electionId),
+                where: electionIdInt ? {
+                    electionId: electionIdInt,
                     createdAt: { gte: startDate }
                 } : {
                     createdAt: { gte: startDate }
@@ -43,11 +41,8 @@ router.get('/general', authenticateToken, async (req, res) => {
             })
         ]);
 
-        // Calcul du taux de participation
-        const participationData = await calculateParticipationRate(electionId, startDate);
-
-        // Temps moyen de vote (simulation - à adapter selon votre modèle de données)
-        const avgVoteTime = await calculateAverageVoteTime(electionId, startDate);
+        const participationData = await calculateParticipationRate(electionIdInt, startDate);
+        const avgVoteTime = await calculateAverageVoteTime(electionIdInt, startDate);
 
         res.json({
             totalUsers,
@@ -66,6 +61,7 @@ router.get('/general', authenticateToken, async (req, res) => {
         });
     }
 });
+
 
 /**
  * GET /stats/votes
