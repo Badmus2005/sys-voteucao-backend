@@ -60,14 +60,14 @@ export const getAllStudents = async (req, res) => {
     try {
         const { page = 1, limit = 10, search = '' } = req.query;
 
-        const whereClause = {
+        const whereClause = search ? {
             OR: [
                 { nom: { contains: search, mode: 'insensitive' } },
                 { prenom: { contains: search, mode: 'insensitive' } },
                 { matricule: { contains: search, mode: 'insensitive' } },
                 { filiere: { contains: search, mode: 'insensitive' } }
             ]
-        };
+        } : {};
 
         const [students, total] = await Promise.all([
             prisma.etudiant.findMany({
