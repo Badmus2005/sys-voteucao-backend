@@ -192,4 +192,57 @@ router.get('/stats', authenticateToken, async (req, res) => {
     }
 });
 
+// POST /api/students/:id/reset-credentials - Réinitialiser les identifiants d'un étudiant
+router.post('/:id/reset-credentials', authenticateToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { tempLogin, tempPassword, requirePasswordChange } = req.body;
+
+        // Vérifier que l'utilisateur est admin
+        const adminUser = await prisma.user.findUnique({
+            where: { id: req.user.id },
+            include: { admin: true }
+        });
+
+        if (!adminUser || adminUser.role !== 'ADMIN') {
+            return res.status(403).json({ message: 'Accès refusé' });
+        }
+
+        // Hasher le nouveau mot de passe
+        const hashedPassword = await bcrypt.hash(tempPassword, 12);
+
+        // Mettre à jour l'utilisateur
+        const updatedUser = await prisma.user.update({
+            where: { id: parseInt(id) },
+            data: {
+                email: tempLogin, // Utiliser le login temporaire comme email
+                password: hashedPassword,
+                tempPassword: tempPassword, // Stocker le mot de passe en clair temporairement
+                requirePasswordChange: requirePasswordChange || true,
+                actif: true // Réactiver le compte si nécessaire
+            },
+            include: {
+                etudiant: true
+            }
+        });
+
+
+
+        res.json({
+            message: 'Identifiants réinitialisés avec succès',
+            user: {
+                id: updatedUser.id,
+                email: updatedUser.email,
+                tempPassword: tempPassword // Renvoyer le mot de passe en clair pour l'admin
+            }
+        });
+    } catch (error) {
+        console.error('Error resetting student credentials:', error);
+        res.status(500).json({
+            message: 'Erreur serveur lors de la réinitialisation des identifiants',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+});
+
 export default router;
