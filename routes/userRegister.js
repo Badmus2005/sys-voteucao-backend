@@ -3,17 +3,66 @@ import bcrypt from 'bcrypt';
 import prisma from '../prisma.js';
 
 const router = express.Router();
+// Fonction pour générer un email étudiant automatique
+const generateStudentEmail = (matricule) => {
+  return `etu.${matricule}@ucao.edu`;
+};
+
+// Fonction pour générer un mot de passe temporaire
+const generateTempPassword = () => {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let password = '';
+  for (let i = 0; i < 10; i++) {
+    password += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return password;
+};
+
+// Fonction pour générer un matricule automatique si besoin
+const generateMatricule = (filiere, annee) => {
+  const prefixMap = {
+    'Informatique de Gestion': 'IDG',
+    'Droit': 'DRT',
+    'Medecine': 'MED',
+    'Électronique': 'ELEC',
+    'Génie Télécoms et TIC': 'GTIC',
+    'Informatique Industrielle et Maintenance': 'IIM',
+    'Electrotechnique': 'ELT',
+    'Assurances': 'ASS',
+    'Banque et Finance d\'Entreprise': 'BFE',
+    'Audit et Contrôle de Gestion': 'ACG',
+    'Management des Ressources Humaines': 'MRH',
+    'Action Commerciale et Force de Vente': 'ACFV',
+    'Communication et Action Publicitaire': 'CAP',
+    'Commerce': 'COM',
+    'Informatique de Gestion': 'IG',
+    'Transport et Logistique': 'TL',
+    'Gestion de l\'Environnement et Aménagement du Territoire': 'GEAT',
+    'Production et Gestion des Ressources Animales': 'PGRA',
+    'Sciences et Techniques de Production Végétale': 'STPV',
+    'Stockage Conservation et Conditionnement des Produits Agricoles': 'SCPA',
+    'Gestion des Entreprises Rurales et Agricoles': 'GERA',
+    'Economie': 'ECO'
+  };
+
+  const prefix = prefixMap[filiere] || 'ETU';
+  const year = new Date().getFullYear().toString().slice(-2);
+  const random = Math.floor(1000 + Math.random() * 9000); // 1000-9999
+
+  return `${prefix}${year}${annee}${random}`;
+};
+
 
 // Fonctions de validation intégrées
 const validateEmail = (email) => {
   // Regex email standard + protection contre les injections
-  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) 
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)
     && !/[<>"'`]/.test(email); // Bloque les caractères dangereux
 };
 
 const validatePassword = (password) => {
   // Au moins 8 caractères, 1 majuscule, 1 chiffre, 1 caractère spécial
-  return password.length >= 8 
+  return password.length >= 8
     && /[A-Z]/.test(password)
     && /[0-9]/.test(password)
     && /[!@#$%^&*(),.?":{}|<>]/.test(password);
@@ -34,28 +83,28 @@ const logger = {
 // Middleware de limite de taux intégré
 const rateLimit = (options) => {
   const requests = new Map();
-  
+
   return (req, res, next) => {
     const ip = req.ip;
     const now = Date.now();
     const windowMs = options.windowMs || 15 * 60 * 1000;
     const max = options.max || 5;
-    
+
     const entry = requests.get(ip) || { count: 0, startTime: now };
-    
+
     if (now - entry.startTime > windowMs) {
       requests.set(ip, { count: 1, startTime: now });
       return next();
     }
-    
+
     if (entry.count >= max) {
       logger.error('Rate limit exceeded', { ip });
-      return res.status(429).json({ 
-        success: false, 
-        message: 'Trop de tentatives. Réessayez plus tard.' 
+      return res.status(429).json({
+        success: false,
+        message: 'Trop de tentatives. Réessayez plus tard.'
       });
     }
-    
+
     entry.count++;
     requests.set(ip, entry);
     next();
@@ -69,16 +118,16 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
 
     // Validation de base
     if (!email || !password || !nom || !prenom || !filiere || !annee) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
-        message: 'Tous les champs obligatoires sont requis.' 
+        message: 'Tous les champs obligatoires sont requis.'
       });
     }
 
     if (!validateEmail(email)) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
-        message: 'Format email invalide. Utilisez exemple@ucao.bj' 
+        message: 'Format email invalide. Utilisez exemple@ucao.bj'
       });
     }
 
@@ -90,9 +139,9 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
     }
 
     if (anneeInt < 1 || anneeInt > 3) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
-        message: "L'année doit être entre 1 et 3." 
+        message: "L'année doit être entre 1 et 3."
       });
     }
 
@@ -100,31 +149,39 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
     const emailExists = await prisma.user.findUnique({ where: { email } });
     if (emailExists) {
       logger.error('Email déjà utilisé', { email });
-      return res.status(409).json({ 
+      return res.status(409).json({
         success: false,
-        message: 'Cet email est déjà utilisé.' 
+        message: 'Cet email est déjà utilisé.'
       });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // 1ère année - validation par code
+    // 1ère année - validation par code + génération automatique
     if (anneeInt === 1) {
       if (!code) {
-        return res.status(400).json({ 
+        return res.status(400).json({
           success: false,
-          message: 'Code d\'inscription requis pour la 1ère année.' 
+          message: 'Code d\'inscription requis pour la 1ère année.'
         });
       }
 
       const regCode = await prisma.registrationCode.findUnique({ where: { code } });
       if (!regCode || regCode.isUsed) {
         logger.error('Code d\'inscription invalide', { code });
-        return res.status(400).json({ 
+        return res.status(400).json({
           success: false,
-          message: 'Code d\'inscription invalide ou déjà utilisé.' 
+          message: 'Code d\'inscription invalide ou déjà utilisé.'
         });
       }
+
+      // GÉNÉRER INDENTIFIANT AUTOMATIQUE pour 1ère année
+      const generatedIdentifiant = generateMatricule(filiere, anneeInt);
+
+      // GÉNÉRER EMAIL et MOT DE PASSE
+      const email = generateStudentEmail(generatedIdentifiant);
+      const tempPassword = generateTempPassword();
+      const hashedPassword = await bcrypt.hash(tempPassword, 10);
 
       try {
         const createdUser = await prisma.$transaction(async (tx) => {
@@ -133,10 +190,13 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
               email,
               password: hashedPassword,
               role: 'ETUDIANT',
+              tempPassword: tempPassword,
+              requirePasswordChange: true,
               etudiant: {
                 create: {
                   nom,
                   prenom,
+                  identifiant: generatedIdentifiant, // Matricule généré automatiquement
                   filiere,
                   annee: anneeInt,
                   codeInscription: code
@@ -154,17 +214,29 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
           return user;
         });
 
-        logger.info('Nouvel étudiant inscrit (1ère année)', { 
+        logger.info('Nouvel étudiant inscrit (1ère année)', {
           userId: createdUser.id,
-          email: createdUser.email
+          email: createdUser.email,
+          identifiant: createdUser.etudiant.identifiant
         });
-        
+
         return res.status(201).json({
           success: true,
           message: 'Inscription réussie pour la 1ère année.',
           data: {
-            userId: createdUser.id,
-            email: createdUser.email
+            student: {
+              id: createdUser.id,
+              nom: createdUser.etudiant.nom,
+              prenom: createdUser.etudiant.prenom,
+              identifiant: createdUser.etudiant.identifiant,
+              filiere: createdUser.etudiant.filiere,
+              annee: createdUser.etudiant.annee
+            },
+            temporaryCredentials: {
+              email: email,
+              password: tempPassword,
+              message: 'Conservez ces identifiants pour votre première connexion'
+            }
           }
         });
 
@@ -177,12 +249,12 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
       }
     }
 
-    // Années supérieures - validation par matricule
-    if (anneeInt >= 2) {
+    // Années supérieures (2ème et 3ème) - validation par matricule existant
+    if (anneeInt >= 2 && anneeInt <= 3) {
       if (!matricule) {
-        return res.status(400).json({ 
+        return res.status(400).json({
           success: false,
-          message: 'Matricule requis pour les années supérieures.' 
+          message: 'Matricule requis pour les années supérieures.'
         });
       }
 
@@ -190,56 +262,75 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
         const etuRow = await prisma.etudiant.findUnique({ where: { matricule } });
         if (!etuRow) {
           logger.error('Matricule introuvable', { matricule });
-          return res.status(404).json({ 
+          return res.status(404).json({
             success: false,
-            message: 'Matricule non trouvé. Contactez l\'administration.' 
+            message: 'Matricule non trouvé. Contactez l\'administration.'
           });
         }
 
         if (etuRow.userId) {
           logger.error('Matricule déjà associé', { matricule });
-          return res.status(409).json({ 
+          return res.status(409).json({
             success: false,
-            message: 'Ce matricule est déjà associé à un compte.' 
+            message: 'Ce matricule est déjà associé à un compte.'
           });
         }
 
+        // GÉNÉRER EMAIL et MOT DE PASSE pour années supérieures
+        const generatedIdentifiant = generateMatricule(filiere, anneeInt);
+
+        const email = generateStudentEmail(generatedIdentifiant);
+        const tempPassword = generateTempPassword();
+        const hashedPassword = await bcrypt.hash(tempPassword, 10);
+
         const createdUser = await prisma.$transaction(async (tx) => {
           const user = await tx.user.create({
-            data: { 
-              email, 
-              password: hashedPassword, 
-              role: 'ETUDIANT' 
+            data: {
+              email,
+              password: hashedPassword,
+              role: 'ETUDIANT',
+              tempPassword: tempPassword,
+              requirePasswordChange: true
             }
           });
 
           await tx.etudiant.update({
             where: { id: etuRow.id },
-            data: { 
-              userId: user.id, 
-              nom, 
-              prenom, 
-              filiere, 
-              annee: anneeInt 
+            data: {
+              userId: user.id,
+              nom,
+              prenom,
+              filiere,
+              annee: anneeInt
             }
           });
 
           return user;
         });
 
-        logger.info('Étudiant existant associé', { 
+        logger.info('Étudiant existant associé', {
           userId: createdUser.id,
           matricule,
           annee: anneeInt
         });
-        
+
         return res.status(201).json({
           success: true,
           message: 'Inscription réussie pour les années supérieures.',
           data: {
-            userId: createdUser.id,
-            matricule,
-            annee: anneeInt
+            student: {
+              id: createdUser.id,
+              nom,
+              prenom,
+              matricule,
+              filiere,
+              annee: anneeInt
+            },
+            temporaryCredentials: {
+              email: email,
+              password: tempPassword,
+              message: 'Utilisez ces identifiants pour votre première connexion'
+            }
           }
         });
 

@@ -8,7 +8,7 @@ const router = express.Router();
 // GET /api/students - Récupérer tous les étudiants avec pagination et filtres
 router.get('/', authenticateToken, async (req, res) => {
     try {
-        const { page = 1, limit = 10, filiere, annee, status, search } = req.query;
+        const { page = 1, limit = 10, filiere, annee, status, search, ecole } = req.query;
         const skip = (parseInt(page) - 1) * parseInt(limit);
         const take = parseInt(limit);
 
@@ -33,6 +33,10 @@ router.get('/', authenticateToken, async (req, res) => {
                 ...whereClause.user,
                 actif: status === 'active'
             };
+        }
+
+        if (ecole && ecole !== 'all') {
+            whereClause.ecole = ecole;
         }
 
         // Recherche
@@ -122,66 +126,87 @@ router.put('/:id/status', authenticateToken, async (req, res) => {
 // GET /api/students/stats - Statistiques des étudiants
 router.get('/stats', authenticateToken, async (req, res) => {
     try {
-        const { filiere, annee } = req.query;
+        const { filiere, annee, ecole } = req.query;
 
-        const whereClause = {
-            user: {
-                role: 'ETUDIANT'
-            },
+        // Construction de la clause WHERE avec relations Prisma
+        const baseWhere = {
             ...(filiere && { filiere }),
-            ...(annee && { annee: parseInt(annee) })
+            ...(annee && { annee: parseInt(annee) }),
+            ...(ecole && { ecole }),
+            user: {
+                is: {
+                    role: 'ETUDIANT'
+                }
+            }
         };
 
+        // Requêtes parallèles
         const [
             totalStudents,
             activeStudents,
             inactiveStudents,
             studentsByFiliere,
-            studentsByAnnee
+            studentsByAnnee,
+            studentsByEcole
         ] = await Promise.all([
-            // Total des étudiants
-            prisma.etudiant.count({ where: whereClause }),
+            prisma.etudiant.count({ where: baseWhere }),
 
-            // Étudiants actifs
             prisma.etudiant.count({
                 where: {
-                    ...whereClause,
-                    user: { actif: true }
+                    ...baseWhere,
+                    user: {
+                        is: {
+                            role: 'ETUDIANT',
+                            actif: true
+                        }
+                    }
                 }
             }),
 
-            // Étudiants inactifs
             prisma.etudiant.count({
                 where: {
-                    ...whereClause,
-                    user: { actif: false }
+                    ...baseWhere,
+                    user: {
+                        is: {
+                            role: 'ETUDIANT',
+                            actif: false
+                        }
+                    }
                 }
             }),
 
-            // Répartition par filière
             prisma.etudiant.groupBy({
                 by: ['filiere'],
                 _count: { _all: true },
-                where: whereClause
+                where: baseWhere
             }),
 
-            // Répartition par année
             prisma.etudiant.groupBy({
                 by: ['annee'],
                 _count: { _all: true },
-                where: whereClause
+                where: baseWhere
+            }),
+
+            prisma.etudiant.groupBy({
+                by: ['ecole'],
+                _count: { _all: true },
+                where: baseWhere
             })
         ]);
 
+        // Réponse structurée
         res.json({
             statistics: {
                 totalStudents,
                 activeStudents,
                 inactiveStudents,
-                activationRate: totalStudents > 0 ? ((activeStudents / totalStudents) * 100).toFixed(2) : 0
+                activationRate: totalStudents > 0
+                    ? ((activeStudents / totalStudents) * 100).toFixed(2)
+                    : 0
             },
             byFiliere: studentsByFiliere,
             byAnnee: studentsByAnnee,
+            byEcole: studentsByEcole,
             lastUpdated: new Date().toISOString()
         });
     } catch (error) {
@@ -193,13 +218,13 @@ router.get('/stats', authenticateToken, async (req, res) => {
     }
 });
 
-// POST /api/students/:id/reset-credentials - Réinitialiser les identifiants d'un étudiant
+
+// Route de réinitialisation finale
 router.post('/:id/reset-credentials', authenticateToken, async (req, res) => {
     try {
         const { id } = req.params;
-        const { tempLogin, tempPassword, requirePasswordChange } = req.body;
 
-        // Vérifier que l'utilisateur est admin
+        // Vérifier admin
         const adminUser = await prisma.user.findUnique({
             where: { id: req.user.id },
             include: { admin: true }
@@ -209,39 +234,54 @@ router.post('/:id/reset-credentials', authenticateToken, async (req, res) => {
             return res.status(403).json({ message: 'Accès refusé' });
         }
 
-        // Hasher le nouveau mot de passe
-        const hashedPassword = await bcrypt.hash(tempPassword, 12);
+        // Récupérer l'étudiant
+        const etudiant = await prisma.etudiant.findUnique({
+            where: { userId: parseInt(id) },
+            include: { user: true }
+        });
 
-        // Mettre à jour l'utilisateur
-        const updatedUser = await prisma.user.update({
+        if (!etudiant) {
+            return res.status(404).json({ message: 'Étudiant non trouvé' });
+        }
+
+        // GÉNÉRER NOUVEAUX IDENTIFIANTS
+        const newEmail = `etu.${etudiant.matricule}@ucao.edu`;
+        const newPassword = generateTempPassword();
+        const hashedPassword = await bcrypt.hash(newPassword, 12);
+
+        // METTRE À JOUR LE COMPTE
+        await prisma.user.update({
             where: { id: parseInt(id) },
             data: {
-                email: tempLogin, // Utiliser le login temporaire comme email
+                email: newEmail,
                 password: hashedPassword,
-                tempPassword: tempPassword, // Stocker le mot de passe en clair temporairement
-                requirePasswordChange: requirePasswordChange || true,
-                actif: true // Réactiver le compte si nécessaire
-            },
-            include: {
-                etudiant: true
+                tempPassword: newPassword, // Stocker temporairement
+                requirePasswordChange: true, // Forcer changement
+                actif: true // Réactiver si désactivé
             }
         });
 
-
-
+        // RÉPONSE
         res.json({
+            success: true,
             message: 'Identifiants réinitialisés avec succès',
-            user: {
-                id: updatedUser.id,
-                email: updatedUser.email,
-                tempPassword: tempPassword // Renvoyer le mot de passe en clair pour l'admin
+            credentials: {
+                login: newEmail,
+                password: newPassword,
+                message: 'À changer à la première connexion'
+            },
+            student: {
+                nom: etudiant.nom,
+                prenom: etudiant.prenom,
+                matricule: etudiant.matricule
             }
         });
+
     } catch (error) {
-        console.error('Error resetting student credentials:', error);
+        console.error('Error:', error);
         res.status(500).json({
-            message: 'Erreur serveur lors de la réinitialisation des identifiants',
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+            success: false,
+            message: 'Erreur lors de la réinitialisation'
         });
     }
 });
