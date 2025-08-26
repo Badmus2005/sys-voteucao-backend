@@ -28,6 +28,7 @@ model User {
   usedRegistrationCode RegistrationCode? @relation("UserUsedCode")
   voteTokens        VoteToken[]
   activityLogs      ActivityLog[]     @relation("UserActivityLogs")
+  notifications Notification[]
 }
 
 model Etudiant {
