@@ -11,9 +11,13 @@ const router = express.Router();
 router.get('/general', authenticateToken, async (req, res) => {
     try {
         const { period = '30', electionId } = req.query;
-        const startDate = calculateStartDate(parseInt(period));
+
+        // Sécurisation des paramètres
+        const parsedPeriod = parseInt(period);
+        const startDate = isNaN(parsedPeriod) ? new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) : calculateStartDate(parsedPeriod);
         const electionIdInt = electionId ? parseInt(electionId) : undefined;
 
+        // Requêtes Prisma sécurisées
         const [totalUsers, totalVotes, totalElections, totalCandidates] = await Promise.all([
             prisma.user.count({
                 where: {
@@ -41,9 +45,28 @@ router.get('/general', authenticateToken, async (req, res) => {
             })
         ]);
 
-        const participationData = await calculateParticipationRate(electionIdInt, startDate);
-        const avgVoteTime = await calculateAverageVoteTime(electionIdInt, startDate);
+        // Calculs encapsulés avec fallback
+        let participationData = {
+            userPercent: 0,
+            votePercent: 0,
+            candidatePercent: 0,
+            electionPercent: 0
+        };
+        let avgVoteTime = 0;
 
+        try {
+            participationData = await calculateParticipationRate(electionIdInt, startDate);
+        } catch (err) {
+            console.warn('Erreur participationRate:', err.message);
+        }
+
+        try {
+            avgVoteTime = await calculateAverageVoteTime(electionIdInt, startDate);
+        } catch (err) {
+            console.warn('Erreur avgVoteTime:', err.message);
+        }
+
+        // Réponse structurée pour le frontend
         res.json({
             users: {
                 total: totalUsers,
