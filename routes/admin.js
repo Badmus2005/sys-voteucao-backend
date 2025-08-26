@@ -2,7 +2,7 @@ import express from 'express';
 import prisma from '../prisma.js';
 import { authenticateToken, requireAdmin } from '../middlewares/auth.js';
 import { resetStudentAccess, getStudentByMatricule, getAllStudents } from '../controllers/adminController.js';
-import express from 'express';
+
 
 const router = express.Router();
 
