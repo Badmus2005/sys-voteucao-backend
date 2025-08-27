@@ -6,10 +6,8 @@ import prisma from '../prisma.js';
 import { authenticateToken } from '../middlewares/auth.js';
 import { PasswordResetService } from '../services/passwordResetService.js';
 
-
 const router = express.Router();
 
-// Configuration du transporteur email
 const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
@@ -18,114 +16,108 @@ const transporter = nodemailer.createTransport({
     }
 });
 
+const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret';
+const JWT_EXPIRES_NORMAL = '8h';
+const JWT_EXPIRES_TEMP = '1h';
 
-// Route de connexion 
+// --- LOGIN ---
+// accepte body: { identifier/email, password, identifiantTemporaire (optionnel) }
+// on supporte recherche par email OR identifiantTemporaire
 router.post('/', async (req, res) => {
     try {
         console.log('=== DÉBUT LOGIN ===');
         console.log('Body reçu:', JSON.stringify(req.body, null, 2));
 
-        const { email, password, identifiantTemporaire } = req.body;
+        // Accept both shapes: either { email, password } or { identifier, password } or { identifiantTemporaire, password }
+        const identifier = req.body.identifier || req.body.email || null;
+        const { password, identifiantTemporaire } = req.body;
 
-        // Si identifiant temporaire est fourni, utiliser cette méthode
+        // If identifiantTemporaire explicitly provided -> handle temporary flow
         if (identifiantTemporaire) {
-            console.log('Tentative avec identifiant temporaire');
+            console.log('Tentative avec identifiant temporaire fournie');
             return handleTemporaryLogin(req, res);
         }
 
-        if (!email || !password) {
+        if (!identifier || !password) {
             console.log('Champs manquants');
-            return res.status(400).json({ message: 'Email et mot de passe requis' });
+            return res.status(400).json({ success: false, message: 'Identifiant et mot de passe requis' });
         }
 
-        console.log('Recherche utilisateur avec email:', email);
-
-        const user = await prisma.user.findUnique({
-            where: { email },
-            include: {
-                etudiant: true,
-                admin: true
-            }
+        // Try find by email first
+        let user = await prisma.user.findUnique({
+            where: { email: identifier },
+            include: { etudiant: true, admin: true }
         });
+
+        // If not found, try find by identifiantTemporaire reference
+        if (!user) {
+            const studentRow = await prisma.etudiant.findFirst({
+                where: { identifiantTemporaire: identifier },
+                include: { user: true }
+            });
+            if (studentRow && studentRow.user) user = studentRow.user;
+        }
 
         if (!user) {
             console.log('Utilisateur non trouvé');
-            return res.status(401).json({ message: 'Email ou mot de passe incorrect' });
+            return res.status(401).json({ success: false, message: 'Identifiants invalides' });
         }
 
-        console.log('Utilisateur trouvé:', user.email);
+        console.log('Utilisateur trouvé:', user.email || user.id);
 
-        // VÉRIFICATION CRITIQUE: Si l'utilisateur a besoin de changer son mot de passe
-        // et qu'il a un mot de passe temporaire, on refuse la connexion normale
-        if (user.requirePasswordChange && user.tempPassword) {
-            console.log('Connexion normale refusée - Mot de passe temporaire actif');
+        // If temporary password exists -> require using it (priority to temp)
+        if (user.tempPassword) {
+            // Inform frontend that temporary credentials are required
+            console.log('temporary password exists - block normal login');
             return res.status(401).json({
-                message: 'Votre compte a été réinitialisé. Utilisez vos identifiants temporaires ou réinitialisez votre mot de passe.'
+                success: false,
+                message: 'Votre compte a été réinitialisé. Utilisez vos identifiants temporaires.',
+                requirePasswordChange: true
             });
         }
 
+        // Normal password flow
         const validPassword = await bcrypt.compare(password, user.password);
-        console.log('Résultat bcrypt.compare:', validPassword);
-
         if (!validPassword) {
             console.log('Mot de passe invalide');
-            return res.status(401).json({ message: 'Email ou mot de passe incorrect' });
+            return res.status(401).json({ success: false, message: 'Identifiants invalides' });
         }
 
-        console.log('Connexion réussie pour:', user.email);
-
+        // Issue token
         const token = jwt.sign(
-            {
-                id: user.id,
-                role: user.role,
-                requirePasswordChange: user.requirePasswordChange
-            },
-            process.env.JWT_SECRET,
-            { expiresIn: '8h' }
+            { id: user.id, role: user.role, requirePasswordChange: user.requirePasswordChange },
+            JWT_SECRET,
+            { expiresIn: JWT_EXPIRES_NORMAL }
         );
 
-        const response = {
+        res.json({
+            success: true,
             message: 'Connexion réussie',
-            token,
-            requirePasswordChange: user.requirePasswordChange,
-            user: {
-                id: user.id,
-                email: user.email,
-                role: user.role
+            data: {
+                token,
+                requirePasswordChange: user.requirePasswordChange || false,
+                user: { id: user.id, email: user.email, role: user.role }
             }
-        };
-
-        res.json(response);
+        });
         console.log('=== FIN LOGIN SUCCÈS ===');
-
     } catch (error) {
         console.error('ERREUR LOGIN:', error);
-        res.status(500).json({ message: 'Erreur serveur lors de la connexion' });
+        res.status(500).json({ success: false, message: 'Erreur serveur lors de la connexion' });
     }
 });
 
-router.get('/test', (req, res) => res.send('OK'));
-
-router.get('/', (req, res) => {
-    res.send('Route GET userLogin OK');
-});
-
-
-// Gestion de la connexion avec identifiants temporaires
+// --- Temporary login handler (identifiantTemporaire + temp password) ---
 const handleTemporaryLogin = async (req, res) => {
     try {
         const { identifiantTemporaire, password } = req.body;
-
         if (!identifiantTemporaire || !password) {
-            return res.status(400).json({ message: 'Identifiant temporaire et mot de passe requis' });
+            return res.status(400).json({ success: false, message: 'Identifiant temporaire et mot de passe requis' });
         }
 
-        const student = await PasswordResetService.validateTemporaryCredentials(
-            identifiantTemporaire,
-            password
-        );
+        // Validate via service (checks expiry + hash)
+        const student = await PasswordResetService.validateTemporaryCredentials(identifiantTemporaire, password);
 
-        // Générer un token avec flag de changement requis
+        // Generate short-lived token
         const token = jwt.sign(
             {
                 id: student.user.id,
@@ -133,316 +125,221 @@ const handleTemporaryLogin = async (req, res) => {
                 role: student.user.role,
                 requirePasswordChange: true
             },
-            process.env.JWT_SECRET,
-            { expiresIn: '1h' } // Token court pour changement de mot de passe
+            JWT_SECRET,
+            { expiresIn: JWT_EXPIRES_TEMP }
         );
 
-        res.json({
+        return res.json({
+            success: true,
             message: 'Connexion temporaire réussie - Changement de mot de passe requis',
-            token,
-            requirePasswordChange: true,
-            user: {
-                id: student.user.id,
-                email: student.user.email,
-                role: student.user.role,
+            data: {
+                token,
                 requirePasswordChange: true,
-                etudiant: {
-                    id: student.id,
-                    nom: student.nom,
-                    prenom: student.prenom,
-                    matricule: student.matricule,
-                    filiere: student.filiere,
-                    annee: student.annee
+                user: {
+                    id: student.user.id,
+                    email: student.user.email,
+                    role: student.user.role,
+                    etudiant: {
+                        id: student.id,
+                        nom: student.nom,
+                        prenom: student.prenom,
+                        matricule: student.matricule,
+                        filiere: student.filiere,
+                        annee: student.annee,
+                        identifiantTemporaire: student.identifiantTemporaire
+                    }
                 }
             }
         });
     } catch (error) {
-        res.status(401).json({
-            message: error.message
-        });
+        console.error('Temporary login error:', error);
+        return res.status(401).json({ success: false, message: error.message });
     }
 };
 
-// Route pour changer le mot de passe après réinitialisation
+// --- Change password after temporary login ---
+// Now if user.requirePasswordChange === true, we allow sending only { newPassword, confirmPassword }
+// without requiring currentPassword. If requirePasswordChange is false, currentPassword is required.
 router.post('/change-password-temporary', authenticateToken, async (req, res) => {
     try {
         const { newPassword, confirmPassword, currentPassword } = req.body;
-
-        // Validation des données
-        if (!newPassword || !confirmPassword || !currentPassword) {
-            return res.status(400).json({ message: 'Tous les champs sont requis' });
+        if (!newPassword || !confirmPassword) {
+            return res.status(400).json({ success: false, message: 'Tous les champs requis' });
         }
-
         if (newPassword !== confirmPassword) {
-            return res.status(400).json({ message: 'Les mots de passe ne correspondent pas' });
+            return res.status(400).json({ success: false, message: 'Les mots de passe ne correspondent pas' });
+        }
+        if (newPassword.length < 8) {
+            return res.status(400).json({ success: false, message: 'Le mot de passe doit contenir au moins 8 caractères' });
         }
 
-        if (newPassword.length < 8) {
-            return res.status(400).json({
-                message: 'Le mot de passe doit contenir au moins 8 caractères'
+        const user = await prisma.user.findUnique({
+            where: { id: req.user.id },
+            select: { id: true, tempPassword: true, password: true, requirePasswordChange: true }
+        });
+
+        if (!user) return res.status(404).json({ success: false, message: 'Utilisateur introuvable' });
+
+        // If requirePasswordChange is true -> we do not require currentPassword,
+        // but we still ensure that tempPassword existed and was valid at login time.
+        if (user.requirePasswordChange) {
+            // simply complete reset
+            await PasswordResetService.completePasswordReset(user.id, newPassword);
+
+            // issue new token without flag
+            const newToken = jwt.sign({ id: user.id, role: req.user.role, requirePasswordChange: false }, JWT_SECRET, { expiresIn: JWT_EXPIRES_NORMAL });
+
+            return res.json({
+                success: true,
+                message: 'Mot de passe changé avec succès',
+                data: { token: newToken, requirePasswordChange: false }
             });
         }
 
-        // Vérifier que l'utilisateur a besoin de changer son mot de passe
-        const user = await prisma.user.findUnique({
-            where: { id: req.user.id },
-            select: { id: true, tempPassword: true, role: true, requirePasswordChange: true }
-        });
-
-        if (!user || !user.requirePasswordChange) {
-            return res.status(400).json({ message: 'Changement de mot de passe non requis' });
+        // Otherwise: standard flow requires currentPassword
+        if (!currentPassword) {
+            return res.status(400).json({ success: false, message: 'Mot de passe actuel requis' });
         }
 
-        // Vérifier le mot de passe temporaire actuel
-        const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.tempPassword || '');
-        if (!isCurrentPasswordValid) {
-            return res.status(401).json({ message: 'Mot de passe temporaire incorrect' });
+        const isCurrentValid = await bcrypt.compare(currentPassword, user.password);
+        if (!isCurrentValid) {
+            return res.status(401).json({ success: false, message: 'Mot de passe actuel incorrect' });
         }
 
-        // Changer le mot de passe et réactiver le compte
+        // Prevent using same password
+        const isSame = await bcrypt.compare(newPassword, user.password);
+        if (isSame) {
+            return res.status(400).json({ success: false, message: 'Le nouveau mot de passe doit être différent de l\'ancien' });
+        }
+
+        // Use PasswordResetService.completePasswordReset to standardize
         await PasswordResetService.completePasswordReset(user.id, newPassword);
 
-        // Régénérer le token sans le flag de changement
-        const newToken = jwt.sign(
-            {
-                id: user.id,
-                role: user.role,
-                requirePasswordChange: false
-            },
-            process.env.JWT_SECRET,
-            { expiresIn: '8h' }
-        );
-
-        res.json({
-            success: true,
-            message: 'Mot de passe changé avec succès',
-            token: newToken,
-            requirePasswordChange: false
-        });
-
+        return res.json({ success: true, message: 'Mot de passe changé avec succès' });
     } catch (error) {
         console.error('Erreur changement mot de passe temporaire:', error);
-        res.status(500).json({
-            message: 'Erreur lors du changement de mot de passe'
-        });
+        return res.status(500).json({ success: false, message: 'Erreur lors du changement de mot de passe' });
     }
 });
 
-// Route pour changer le mot de passe
+// --- Change password normal (user authenticated) ---
 router.post('/change-password', authenticateToken, async (req, res) => {
     try {
         const { currentPassword, newPassword, confirmPassword } = req.body;
 
-        // Validation des données
         if (!currentPassword || !newPassword || !confirmPassword) {
-            return res.status(400).json({ message: 'Tous les champs sont requis' });
+            return res.status(400).json({ success: false, message: 'Tous les champs sont requis' });
         }
-
         if (newPassword !== confirmPassword) {
-            return res.status(400).json({ message: 'Les mots de passe ne correspondent pas' });
+            return res.status(400).json({ success: false, message: 'Les mots de passe ne correspondent pas' });
         }
-
         if (newPassword.length < 8) {
-            return res.status(400).json({
-                message: 'Le mot de passe doit contenir au moins 8 caractères'
-            });
+            return res.status(400).json({ success: false, message: 'Le mot de passe doit contenir au moins 8 caractères' });
         }
 
-        // Vérifier que l'utilisateur est un étudiant
-        const user = await prisma.user.findUnique({
-            where: { id: req.user.id },
-            select: { id: true, password: true, role: true }
-        });
-
-        if (!user || user.role !== 'ETUDIANT') {
-            return res.status(403).json({ message: 'Accès réservé aux étudiants' });
-        }
+        const user = await prisma.user.findUnique({ where: { id: req.user.id }, select: { id: true, password: true, role: true } });
+        if (!user) return res.status(404).json({ success: false, message: 'Utilisateur introuvable' });
 
         // Vérifier l'ancien mot de passe
         const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password);
         if (!isCurrentPasswordValid) {
-            return res.status(401).json({ message: 'Mot de passe actuel incorrect' });
+            return res.status(401).json({ success: false, message: 'Mot de passe actuel incorrect' });
         }
 
         // Vérifier que le nouveau mot de passe est différent de l'ancien
         const isSamePassword = await bcrypt.compare(newPassword, user.password);
         if (isSamePassword) {
-            return res.status(400).json({
-                message: 'Le nouveau mot de passe doit être différent de l\'ancien'
-            });
+            return res.status(400).json({ success: false, message: 'Le nouveau mot de passe doit être différent de l\'ancien' });
         }
 
-        // Hacher le nouveau mot de passe
-        const saltRounds = 10;
-        const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+        await prisma.user.update({ where: { id: req.user.id }, data: { password: hashedPassword } });
 
-        // Mettre à jour le mot de passe
-        await prisma.user.update({
-            where: { id: req.user.id },
-            data: { password: hashedPassword }
-        });
-
-        res.json({
-            success: true,
-            message: 'Mot de passe changé avec succès'
-        });
-
+        return res.json({ success: true, message: 'Mot de passe changé avec succès' });
     } catch (error) {
         console.error('Erreur changement mot de passe:', error);
-        res.status(500).json({
-            message: 'Erreur lors du changement de mot de passe'
-        });
+        return res.status(500).json({ success: false, message: 'Erreur lors du changement de mot de passe' });
     }
 });
 
-// Route pour mot de passe oublié - Envoi d'email
+// --- Forgot password (send reset email) ---
 router.post('/forgot-password', async (req, res) => {
     try {
         const { email } = req.body;
+        if (!email) return res.status(400).json({ success: false, message: 'Email requis' });
 
-        if (!email) {
-            return res.status(400).json({ message: 'Email requis' });
-        }
+        const user = await prisma.user.findUnique({ where: { email }, include: { etudiant: true } });
 
-        // Vérifier si l'email existe et est un étudiant
-        const user = await prisma.user.findUnique({
-            where: { email },
-            include: { etudiant: true }
-        });
-
-        // Pour des raisons de sécurité, on ne révèle pas si l'email existe
+        // pour sécurité on donne toujours le même message
         if (!user || user.role !== 'ETUDIANT') {
-            return res.json({
-                message: 'Si cet email existe dans notre système, un lien de réinitialisation a été envoyé'
-            });
+            return res.json({ success: true, message: 'Si cet email existe dans notre système, un lien de réinitialisation a été envoyé' });
         }
 
-        // Générer un token de réinitialisation (valide 1 heure)
-        const resetToken = jwt.sign(
-            {
-                userId: user.id,
-                type: 'password_reset',
-                email: user.email
-            },
-            process.env.JWT_SECRET,
-            { expiresIn: '1h' }
-        );
-
-        // Créer le lien de réinitialisation
+        const resetToken = jwt.sign({ userId: user.id, type: 'password_reset', email: user.email }, JWT_SECRET, { expiresIn: '1h' });
         const resetLink = `${process.env.FRONTEND_URL}/reset-password.html?token=${resetToken}`;
 
-        // Préparer l'email
         const mailOptions = {
             from: process.env.EMAIL_FROM || 'no-reply@ucao-uuc.com',
             to: email,
             subject: 'Réinitialisation de votre mot de passe - UCAO-UUC',
             html: `
-                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-                    <h2 style="color: #800020;">Réinitialisation de mot de passe</h2>
-                    <p>Bonjour ${user.etudiant?.prenom || 'Étudiant'},</p>
-                    <p>Vous avez demandé à réinitialiser votre mot de passe pour la plateforme de vote UCAO-UUC.</p>
-                    
-                    <p>Pour créer un nouveau mot de passe, cliquez sur le bouton ci-dessous :</p>
-                    
-                    <div style="text-align: center; margin: 30px 0;">
-                        <a href="${resetLink}" 
-                           style="background-color: #800020; color: white; padding: 15px 30px; 
-                                  text-decoration: none; border-radius: 5px; font-weight: bold;">
-                            Réinitialiser mon mot de passe
-                        </a>
-                    </div>
-
-                    <p>Ce lien est valable pendant <strong>1 heure</strong> pour des raisons de sécurité.</p>
-                    
-                    <p>Si vous n'avez pas demandé cette réinitialisation, ignorez simplement cet email.</p>
-                    
-                    <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
-                    
-                    <p style="color: #666; font-size: 12px;">
-                        Équipe UCAO-UUC<br>
-                        Plateforme de vote électronique
-                    </p>
-                </div>
-            `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <h2 style="color:#800020;">Réinitialisation de mot de passe</h2>
+          <p>Bonjour ${user.etudiant?.prenom || 'Étudiant'},</p>
+          <p>Pour créer un nouveau mot de passe, cliquez sur le bouton ci-dessous :</p>
+          <div style="text-align:center; margin:30px 0;">
+            <a href="${resetLink}" style="background-color:#800020;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;">Réinitialiser mon mot de passe</a>
+          </div>
+          <p>Ce lien est valable pendant <strong>1 heure</strong>.</p>
+          <p>Si vous n'avez pas demandé cette réinitialisation, ignorez cet email.</p>
+        </div>`
         };
 
-        // Envoyer l'email
         await transporter.sendMail(mailOptions);
 
-        res.json({
-            success: true,
-            message: 'Si cet email existe dans notre système, un lien de réinitialisation a été envoyé'
-        });
-
+        return res.json({ success: true, message: 'Si cet email existe dans notre système, un lien de réinitialisation a été envoyé' });
     } catch (error) {
         console.error('Erreur envoi email réinitialisation:', error);
-        res.status(500).json({
-            message: 'Erreur lors de l\'envoi des instructions de réinitialisation'
-        });
+        return res.status(500).json({ success: false, message: 'Erreur lors de l\'envoi des instructions de réinitialisation' });
     }
 });
 
-// Route pour réinitialiser le mot de passe avec token
+// --- Reset password via token (from forgot-password email) ---
 router.post('/reset-password', async (req, res) => {
     try {
         const { token, newPassword, confirmPassword } = req.body;
+        if (!token || !newPassword || !confirmPassword) return res.status(400).json({ success: false, message: 'Tous les champs sont requis' });
+        if (newPassword !== confirmPassword) return res.status(400).json({ success: false, message: 'Les mots de passe ne correspondent pas' });
+        if (newPassword.length < 8) return res.status(400).json({ success: false, message: 'Le mot de passe doit contenir au moins 8 caractères' });
 
-        if (!token || !newPassword || !confirmPassword) {
-            return res.status(400).json({ message: 'Tous les champs sont requis' });
-        }
-
-        if (newPassword !== confirmPassword) {
-            return res.status(400).json({ message: 'Les mots de passe ne correspondent pas' });
-        }
-
-        if (newPassword.length < 8) {
-            return res.status(400).json({
-                message: 'Le mot de passe doit contenir au moins 8 caractères'
-            });
-        }
-
-        // Vérifier et décoder le token
         let decoded;
         try {
-            decoded = jwt.verify(token, process.env.JWT_SECRET);
-        } catch (error) {
-            return res.status(401).json({ message: 'Lien de réinitialisation invalide ou expiré' });
+            decoded = jwt.verify(token, JWT_SECRET);
+        } catch (err) {
+            return res.status(401).json({ success: false, message: 'Lien de réinitialisation invalide ou expiré' });
         }
 
-        // Vérifier que c'est bien un token de réinitialisation
-        if (decoded.type !== 'password_reset') {
-            return res.status(401).json({ message: 'Token invalide' });
-        }
+        if (decoded.type !== 'password_reset') return res.status(401).json({ success: false, message: 'Token invalide' });
 
-        // Vérifier que l'utilisateur existe toujours
-        const user = await prisma.user.findUnique({
-            where: { id: decoded.userId }
-        });
+        const user = await prisma.user.findUnique({ where: { id: decoded.userId } });
+        if (!user) return res.status(404).json({ success: false, message: 'Utilisateur non trouvé' });
 
-        if (!user) {
-            return res.status(404).json({ message: 'Utilisateur non trouvé' });
-        }
-
-        // Hacher le nouveau mot de passe
-        const saltRounds = 10;
-        const hashedPassword = await bcrypt.hash(newPassword, saltRounds);
-
-        // Mettre à jour le mot de passe
+        // Hash and update password; clear any temporary fields and flag
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
         await prisma.user.update({
             where: { id: user.id },
-            data: { password: hashedPassword }
+            data: {
+                password: hashedPassword,
+                tempPassword: null,
+                requirePasswordChange: false,
+                passwordResetExpires: null
+            }
         });
 
-        res.json({
-            success: true,
-            message: 'Mot de passe réinitialisé avec succès'
-        });
-
+        return res.json({ success: true, message: 'Mot de passe réinitialisé avec succès' });
     } catch (error) {
         console.error('Erreur réinitialisation mot de passe:', error);
-        res.status(500).json({
-            message: 'Erreur lors de la réinitialisation du mot de passe'
-        });
+        return res.status(500).json({ success: false, message: 'Erreur lors de la réinitialisation du mot de passe' });
     }
 });
 

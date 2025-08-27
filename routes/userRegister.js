@@ -4,78 +4,44 @@ import prisma from '../prisma.js';
 
 const router = express.Router();
 
-// Fonction pour générer un identifiant temporaire
+// Génère un identifiant temporaire stable (créé à l'inscription, utilisé uniquement si reset)
 const generateTemporaryIdentifiant = () => {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   let identifiant = '';
-  for (let i = 0; i < 8; i++) {
-    identifiant += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
+  for (let i = 0; i < 8; i++) identifiant += chars.charAt(Math.floor(Math.random() * chars.length));
   return `TEMP${identifiant}`;
 };
 
-// Fonction pour générer un mot de passe temporaire
-const generateTempPassword = () => {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let password = '';
-  for (let i = 0; i < 10; i++) {
-    password += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return password;
-};
+// Validations simples
+const validateEmail = (email) =>
+  /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) && !/[<>"'`]/.test(email);
 
-// Fonctions de validation intégrées
-const validateEmail = (email) => {
-  // Regex email standard + protection contre les injections
-  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)
-    && !/[<>"'`]/.test(email); // Bloque les caractères dangereux
-};
+const validatePassword = (password) =>
+  password.length >= 8 && /[A-Z]/.test(password) && /[0-9]/.test(password) && /[!@#$%^&*(),.?":{}|<>]/.test(password);
 
-const validatePassword = (password) => {
-  // Au moins 8 caractères, 1 majuscule, 1 chiffre, 1 caractère spécial
-  return password.length >= 8
-    && /[A-Z]/.test(password)
-    && /[0-9]/.test(password)
-    && /[!@#$%^&*(),.?":{}|<>]/.test(password);
-};
-
-// Logger simplifié intégré
+// Logger minimal
 const logger = {
-  info: (message, data) => console.log(`[INFO] ${message}`, JSON.stringify(data)),
-  error: (message, error) => {
-    console.error(`[ERROR] ${message}`, {
-      error: error.message,
-      stack: error.stack,
-      timestamp: new Date().toISOString()
-    });
-  }
+  info: (m, d) => console.log(`[INFO] ${m}`, JSON.stringify(d)),
+  error: (m, e) => console.error(`[ERROR] ${m}`, { error: e.message, stack: e.stack, at: new Date().toISOString() })
 };
 
-// Middleware de limite de taux intégré
+// Rate limit très simple
 const rateLimit = (options) => {
   const requests = new Map();
-
   return (req, res, next) => {
     const ip = req.ip;
     const now = Date.now();
     const windowMs = options.windowMs || 15 * 60 * 1000;
     const max = options.max || 5;
-
     const entry = requests.get(ip) || { count: 0, startTime: now };
-
     if (now - entry.startTime > windowMs) {
       requests.set(ip, { count: 1, startTime: now });
       return next();
     }
-
     if (entry.count >= max) {
       logger.error('Rate limit exceeded', { ip });
-      return res.status(429).json({
-        success: false,
-        message: 'Trop de tentatives. Réessayez plus tard.'
-      });
+      return res.status(429).json({ success: false, message: 'Trop de tentatives. Réessayez plus tard.' });
     }
-
     entry.count++;
     requests.set(ip, entry);
     next();
@@ -86,31 +52,18 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
   try {
     const { email, password, nom, prenom, filiere, annee, code, matricule, ecole } = req.body;
 
-    // Validation de base
+    // Champs obligatoires
     if (!email || !password || !nom || !prenom || !filiere || !annee || !ecole) {
-      return res.status(400).json({
-        success: false,
-        message: 'Tous les champs obligatoires sont requis.'
-      });
+      return res.status(400).json({ success: false, message: 'Tous les champs obligatoires sont requis.' });
     }
 
-    // Conversion de l'année en nombre
-    const anneeInt = parseInt(annee, 10);
-
-    if (isNaN(anneeInt) || anneeInt < 1 || anneeInt > 3) {
-      return res.status(400).json({
-        success: false,
-        message: "L'année doit être entre 1 et 3."
-      });
+    const anneeInt = Number.parseInt(annee, 10);
+    if (!Number.isInteger(anneeInt) || anneeInt < 1 || anneeInt > 3) {
+      return res.status(400).json({ success: false, message: "L'année doit être entre 1 et 3." });
     }
-
     if (!validateEmail(email)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Format email invalide. Utilisez exemple@ucao.bj'
-      });
+      return res.status(400).json({ success: false, message: 'Format email invalide.' });
     }
-
     if (!validatePassword(password)) {
       return res.status(400).json({
         success: false,
@@ -118,50 +71,38 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
       });
     }
 
-    // Vérifier l'unicité de l'email
+    // Email unique
     const emailExists = await prisma.user.findUnique({ where: { email } });
     if (emailExists) {
-      logger.error('Email déjà utilisé', { email });
-      return res.status(409).json({
-        success: false,
-        message: 'Cet email est déjà utilisé.'
-      });
+      return res.status(409).json({ success: false, message: "Cet email est déjà utilisé." });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // 1ère année - validation par code + identifiant temporaire
+    // ————————————————————————————————————————————————————————————————
+    // 1) 1ère année : code d'inscription —> crée user avec password normal,
+    //    génère identifiantTemporaire, PAS de temporaryPassword.
+    // ————————————————————————————————————————————————————————————————
     if (anneeInt === 1) {
       if (!code) {
-        return res.status(400).json({
-          success: false,
-          message: 'Code d\'inscription requis pour la 1ère année.'
-        });
+        return res.status(400).json({ success: false, message: "Code d'inscription requis pour la 1ère année." });
       }
-
       const regCode = await prisma.registrationCode.findUnique({ where: { code } });
       if (!regCode || regCode.isUsed) {
-        logger.error('Code d\'inscription invalide', { code });
-        return res.status(400).json({
-          success: false,
-          message: 'Code d\'inscription invalide ou déjà utilisé.'
-        });
+        return res.status(400).json({ success: false, message: "Code d'inscription invalide ou déjà utilisé." });
       }
 
-      // GÉNÉRER IDENTIFIANT TEMPORAIRE pour 1ère année
-      const temporaryIdentifiant = generateTemporaryIdentifiant();
-      const tempPassword = generateTempPassword();
-      const hashedTempPassword = await bcrypt.hash(tempPassword, 10);
-
       try {
+        const temporaryIdentifiant = generateTemporaryIdentifiant();
+
         const createdUser = await prisma.$transaction(async (tx) => {
           const user = await tx.user.create({
             data: {
               email,
-              password: hashedTempPassword,
+              password: hashedPassword,
               role: 'ETUDIANT',
-              tempPassword: tempPassword,
-              requirePasswordChange: true,
+              temporaryPassword: null,           // <— important
+              requirePasswordChange: false,      // <— important
               etudiant: {
                 create: {
                   nom,
@@ -186,15 +127,11 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
           return user;
         });
 
-        logger.info('Nouvel étudiant inscrit (1ère année)', {
-          userId: createdUser.id,
-          email: createdUser.email,
-          identifiantTemporaire: createdUser.etudiant.identifiantTemporaire
-        });
+        logger.info('Inscription 1ère année OK', { userId: createdUser.id, email });
 
         return res.status(201).json({
           success: true,
-          message: 'Inscription réussie pour la 1ère année.',
+          message: "Inscription réussie.",
           data: {
             student: {
               id: createdUser.id,
@@ -204,65 +141,44 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
               filiere: createdUser.etudiant.filiere,
               annee: createdUser.etudiant.annee,
               ecole: createdUser.etudiant.ecole
-            },
-            temporaryCredentials: {
-              identifiant: temporaryIdentifiant,
-              password: tempPassword,
-              message: 'Conservez ces identifiants temporaires pour votre première connexion'
             }
+            // ⛔️ Pas de credentials temporaires renvoyés à la création
           }
         });
-
       } catch (txError) {
-        logger.error('Erreur transaction 1ère année', txError);
-        return res.status(500).json({
-          success: false,
-          message: 'Erreur lors de l\'inscription.',
-          error: process.env.NODE_ENV === 'development' ? txError.message : undefined
-        });
+        logger.error('Erreur transaction 1A', txError);
+        return res.status(500).json({ success: false, message: "Erreur lors de l'inscription." });
       }
     }
 
-    // Années supérieures (2ème et 3ème) - validation par matricule existant
+    // ————————————————————————————————————————————————————————————————
+    // 2) 2e/3e année : via matricule —> compte lié existant, password normal,
+    //    identifiantTemporaire généré si absent, PAS de temporaryPassword.
+    // ————————————————————————————————————————————————————————————————
     if (anneeInt >= 2 && anneeInt <= 3) {
       if (!matricule) {
-        return res.status(400).json({
-          success: false,
-          message: 'Matricule requis pour les années supérieures.'
-        });
+        return res.status(400).json({ success: false, message: 'Matricule requis pour les années supérieures.' });
       }
 
       try {
         const etuRow = await prisma.etudiant.findUnique({ where: { matricule } });
         if (!etuRow) {
-          logger.error('Matricule introuvable', { matricule });
-          return res.status(404).json({
-            success: false,
-            message: 'Matricule non trouvé. Contactez l\'administration.'
-          });
+          return res.status(404).json({ success: false, message: "Matricule non trouvé. Contactez l'administration." });
         }
-
         if (etuRow.userId) {
-          logger.error('Matricule déjà associé', { matricule });
-          return res.status(409).json({
-            success: false,
-            message: 'Ce matricule est déjà associé à un compte.'
-          });
+          return res.status(409).json({ success: false, message: 'Ce matricule est déjà associé à un compte.' });
         }
 
-        // GÉNÉRER IDENTIFIANT TEMPORAIRE pour années supérieures
-        const temporaryIdentifiant = generateTemporaryIdentifiant();
-        const tempPassword = generateTempPassword();
-        const hashedTempPassword = await bcrypt.hash(tempPassword, 10);
+        const temporaryIdentifiant = etuRow.identifiantTemporaire || generateTemporaryIdentifiant();
 
         const createdUser = await prisma.$transaction(async (tx) => {
           const user = await tx.user.create({
             data: {
               email,
-              password: hashedTempPassword,
+              password: hashedPassword,          // <— password normal choisi à l’inscription
               role: 'ETUDIANT',
-              tempPassword: tempPassword,
-              requirePasswordChange: true
+              temporaryPassword: null,
+              requirePasswordChange: false
             }
           });
 
@@ -275,22 +191,19 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
               identifiantTemporaire: temporaryIdentifiant,
               filiere,
               annee: anneeInt,
-              codeInscription: null
+              codeInscription: null,
+              ecole
             }
           });
 
           return user;
         });
 
-        logger.info('Étudiant existant associé', {
-          userId: createdUser.id,
-          matricule,
-          annee: anneeInt
-        });
+        logger.info('Inscription 2/3A OK', { email, matricule });
 
         return res.status(201).json({
           success: true,
-          message: 'Inscription réussie pour les années supérieures.',
+          message: 'Inscription réussie.',
           data: {
             student: {
               id: createdUser.id,
@@ -301,32 +214,19 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
               filiere,
               annee: anneeInt,
               ecole
-            },
-            temporaryCredentials: {
-              identifiant: temporaryIdentifiant,
-              password: tempPassword,
-              message: 'Utilisez ces identifiants temporaires pour votre première connexion'
             }
+            // ⛔️ Pas de credentials temporaires renvoyés à la création
           }
         });
-
       } catch (txError) {
-        logger.error('Erreur transaction années supérieures', txError);
-        return res.status(500).json({
-          success: false,
-          message: 'Erreur lors de l\'association du matricule.',
-          error: process.env.NODE_ENV === 'development' ? txError.message : undefined
-        });
+        logger.error('Erreur transaction 2/3A', txError);
+        return res.status(500).json({ success: false, message: "Erreur lors de l'association du matricule." });
       }
     }
 
   } catch (err) {
     logger.error('Erreur inscription', err);
-    return res.status(500).json({
-      success: false,
-      message: 'Une erreur serveur est survenue.',
-      error: process.env.NODE_ENV === 'development' ? err.message : undefined
-    });
+    return res.status(500).json({ success: false, message: 'Une erreur serveur est survenue.' });
   }
 });
 

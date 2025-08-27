@@ -11,40 +11,39 @@ export const resetStudentAccess = async (req, res) => {
             parseInt(studentId)
         );
 
-        res.json({
+        return res.json({
             success: true,
             message: 'Accès réinitialisés avec succès',
             data: {
                 temporaryIdentifiant: temporaryCredentials.temporaryIdentifiant,
                 temporaryPassword: temporaryCredentials.temporaryPassword,
-                expirationDate: temporaryCredentials.expirationDate,
+                requirePasswordChange: true, // 🔥 flag pour frontend
                 student: {
                     id: temporaryCredentials.student.id,
                     nom: temporaryCredentials.student.nom,
                     prenom: temporaryCredentials.student.prenom,
-                    matricule: temporaryCredentials.student.matricule // Matricule permanent
+                    matricule: temporaryCredentials.student.matricule
                 }
             }
         });
     } catch (error) {
         console.error('Erreur réinitialisation accès:', error);
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
-            error: error.message
+            message: 'Erreur lors de la réinitialisation des accès',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };
 
-// Rechercher par matricule (pour les années supérieures)
+// Recherche par matricule
 export const getStudentByMatricule = async (req, res) => {
     try {
         const { matricule } = req.params;
 
         const student = await prisma.etudiant.findUnique({
             where: { matricule },
-            include: {
-                user: true
-            }
+            include: { user: true }
         });
 
         if (!student) {
@@ -54,29 +53,28 @@ export const getStudentByMatricule = async (req, res) => {
             });
         }
 
-        res.json({
+        return res.json({
             success: true,
             data: student
         });
     } catch (error) {
         console.error('Erreur recherche étudiant:', error);
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
-            error: error.message
+            message: 'Erreur lors de la recherche étudiant',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };
 
-// Rechercher par code d'inscription (pour 1ère année)
+// Recherche par code d'inscription
 export const getStudentByCodeInscription = async (req, res) => {
     try {
         const { code } = req.params;
 
         const student = await prisma.etudiant.findUnique({
             where: { codeInscription: code },
-            include: {
-                user: true
-            }
+            include: { user: true }
         });
 
         if (!student) {
@@ -86,32 +84,36 @@ export const getStudentByCodeInscription = async (req, res) => {
             });
         }
 
-        res.json({
+        return res.json({
             success: true,
             data: student
         });
     } catch (error) {
         console.error('Erreur recherche étudiant par code:', error);
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
-            error: error.message
+            message: 'Erreur lors de la recherche étudiant',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };
 
+// Liste avec pagination + recherche
 export const getAllStudents = async (req, res) => {
     try {
         const { page = 1, limit = 10, search = '' } = req.query;
 
-        const whereClause = search ? {
-            OR: [
-                { nom: { contains: search, mode: 'insensitive' } },
-                { prenom: { contains: search, mode: 'insensitive' } },
-                { matricule: { contains: search, mode: 'insensitive' } }, // Recherche par matricule
-                { codeInscription: { contains: search, mode: 'insensitive' } }, // Recherche par code
-                { filiere: { contains: search, mode: 'insensitive' } }
-            ]
-        } : {};
+        const whereClause = search
+            ? {
+                OR: [
+                    { nom: { contains: search, mode: 'insensitive' } },
+                    { prenom: { contains: search, mode: 'insensitive' } },
+                    { matricule: { contains: search, mode: 'insensitive' } },
+                    { codeInscription: { contains: search, mode: 'insensitive' } },
+                    { filiere: { contains: search, mode: 'insensitive' } }
+                ]
+            }
+            : {};
 
         const [students, total] = await Promise.all([
             prisma.etudiant.findMany({
@@ -121,6 +123,7 @@ export const getAllStudents = async (req, res) => {
                         select: {
                             id: true,
                             email: true,
+                            actif: true,
                             requirePasswordChange: true
                         }
                     }
@@ -132,7 +135,7 @@ export const getAllStudents = async (req, res) => {
             prisma.etudiant.count({ where: whereClause })
         ]);
 
-        res.json({
+        return res.json({
             success: true,
             data: {
                 students,
@@ -146,9 +149,10 @@ export const getAllStudents = async (req, res) => {
         });
     } catch (error) {
         console.error('Erreur liste étudiants:', error);
-        res.status(500).json({
+        return res.status(500).json({
             success: false,
-            error: error.message
+            message: 'Erreur lors de la récupération des étudiants',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };

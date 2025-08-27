@@ -2,149 +2,161 @@ import bcrypt from 'bcrypt';
 import prisma from '../prisma.js';
 
 export class PasswordResetService {
+    // Génère un mot de passe temporaire lisible pour l'admin (retourné en clair)
+    static generateTempPassword(length = 12) {
+        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
+        let password = '';
+        for (let i = 0; i < length; i++) {
+            password += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        return password;
+    }
+
+    /**
+     * Réinitialisation des accès par un admin.
+     * - Ne modifie PAS le password principal.
+     * - Ecrit tempPassword (hashé), requirePasswordChange = true, passwordResetExpires.
+     * - Crée identifiantTemporaire si absent.
+     */
     static async resetStudentAccess(adminId, studentId) {
         try {
-            // Récupérer l'étudiant avec son utilisateur
             const student = await prisma.etudiant.findUnique({
                 where: { id: studentId },
                 include: { user: true }
             });
 
             if (!student || !student.user) {
-                throw new Error('Étudiant non trouvé');
+                throw new Error('Étudiant non trouvé ou sans compte lié');
             }
 
-            // Générer des identifiants temporaires
-            const temporaryIdentifiant = `temp_${Math.random().toString(36).substring(2, 10)}`;
-            const temporaryPassword = this.generateTempPassword(12);
+            // Générer identifiant temporaire si absent
+            let temporaryIdentifiant = student.identifiantTemporaire;
+            if (!temporaryIdentifiant) {
+                const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+                let idt = '';
+                for (let i = 0; i < 8; i++) idt += chars.charAt(Math.floor(Math.random() * chars.length));
+                temporaryIdentifiant = `TEMP${idt}`;
+            }
 
-            // Calculer la date d'expiration (24 heures)
+            const temporaryPasswordPlain = this.generateTempPassword(12);
+            const temporaryPasswordHash = await bcrypt.hash(temporaryPasswordPlain, 10);
+
+            // expiration (24h)
             const expirationDate = new Date();
             expirationDate.setHours(expirationDate.getHours() + 24);
 
-            // Mettre à jour l'étudiant et l'utilisateur
-            const updatedStudent = await prisma.$transaction(async (tx) => {
-                // Mettre à jour l'utilisateur - DÉSACTIVER LE MOT DE PASSE PRINCIPAL
+            // Transaction : update user (tempPassword + require flag + expiry) et etudiant (identifiant si absent)
+            const updated = await prisma.$transaction(async (tx) => {
                 await tx.user.update({
                     where: { id: student.user.id },
                     data: {
-                        tempPassword: await bcrypt.hash(temporaryPassword, 10),
+                        tempPassword: temporaryPasswordHash,         // champ existant dans ton schéma
                         requirePasswordChange: true,
-                        passwordResetExpires: expirationDate,
-                        // Désactiver temporairement le mot de passe principal
-                        password: await bcrypt.hash(`disabled_${Date.now()}`, 10)
+                        passwordResetExpires: expirationDate
+                        // NE PAS TOUCHER à `password` principal
                     }
                 });
 
-                // Mettre à jour l'étudiant avec identifiantTemporaire
-                const updated = await tx.etudiant.update({
+                const updatedStudent = await tx.etudiant.update({
                     where: { id: studentId },
                     data: {
                         identifiantTemporaire: temporaryIdentifiant
                     },
-                    include: {
-                        user: true
-                    }
+                    include: { user: true }
                 });
 
-                return updated;
-            });
-
-            // Journaliser l'action
-            await prisma.activityLog.create({
-                data: {
-                    action: 'RESET_STUDENT_ACCESS',
-                    details: `Réinitialisation des accès pour l'étudiant ${studentId} (${student.nom} ${student.prenom})`,
-                    userId: adminId
+                // Log d'activité si tu as la table activityLog
+                if (tx.activityLog) {
+                    try {
+                        await tx.activityLog.create({
+                            data: {
+                                action: 'RESET_STUDENT_ACCESS',
+                                details: `Admin ${adminId} reset student ${studentId}`,
+                                userId: adminId
+                            }
+                        });
+                    } catch (err) {
+                        // Ne pas bloquer la requête si le log échoue
+                        console.warn('Activity log failed (non blocking):', err.message);
+                    }
                 }
+
+                return updatedStudent;
             });
 
             return {
                 temporaryIdentifiant,
-                temporaryPassword,
+                temporaryPassword: temporaryPasswordPlain,
                 expirationDate,
                 student: {
-                    nom: updatedStudent.nom,
-                    prenom: updatedStudent.prenom,
-                    matricule: updatedStudent.matricule
+                    nom: updated.nom,
+                    prenom: updated.prenom,
+                    matricule: updated.matricule
                 }
             };
-
         } catch (error) {
             throw new Error(`Erreur lors de la réinitialisation: ${error.message}`);
         }
     }
 
+    /**
+     * Valide les credentials temporaires fournis par l'étudiant (identifiantTemporaire + mot de passe temporaire)
+     */
     static async validateTemporaryCredentials(identifiant, password) {
         try {
             const student = await prisma.etudiant.findFirst({
-                where: {
-                    identifiantTemporaire: identifiant
-                },
-                include: {
-                    user: true
-                }
+                where: { identifiantTemporaire: identifiant },
+                include: { user: true }
             });
 
             if (!student || !student.user) {
                 throw new Error('Identifiant temporaire invalide');
             }
 
-            // Vérifier l'expiration
+            // Vérifier expiration si présente
             if (student.user.passwordResetExpires && student.user.passwordResetExpires < new Date()) {
                 throw new Error('Identifiants temporaires expirés');
             }
 
-            // Vérifier le mot de passe
             const isValid = await bcrypt.compare(password, student.user.tempPassword || '');
             if (!isValid) {
                 throw new Error('Mot de passe temporaire incorrect');
             }
 
+            // retourne le student + user (comportement actuel attendu)
             return student;
         } catch (error) {
             throw new Error(`Validation échouée: ${error.message}`);
         }
     }
 
+    /**
+     * Complète le changement de mot de passe après une connexion temporaire.
+     * - Remplace password par le nouveau hash
+     * - Vide tempPassword, passwordResetExpires
+     * - passe requirePasswordChange à false
+     * - **Ne supprime pas** identifiantTemporaire (on garde l'identifiant créé à l'inscription)
+     */
     static async completePasswordReset(userId, newPassword) {
         try {
-            const hashedPassword = await bcrypt.hash(newPassword, 10);
+            const hashed = await bcrypt.hash(newPassword, 10);
 
             await prisma.$transaction([
-                // Mettre à jour le mot de passe principal et nettoyer les temporaires
                 prisma.user.update({
                     where: { id: userId },
                     data: {
-                        password: hashedPassword, // Réactiver le mot de passe principal
+                        password: hashed,
                         tempPassword: null,
                         requirePasswordChange: false,
                         passwordResetExpires: null
                     }
-                }),
-
-                // Nettoyer l'identifiant temporaire
-                prisma.etudiant.update({
-                    where: { userId: userId },
-                    data: {
-                        identifiantTemporaire: null
-                    }
                 })
+                // On NE supprime PAS l'identifiantTemporaire : on le laisse intact.
             ]);
 
+            return true;
         } catch (error) {
             throw new Error(`Erreur lors du changement de mot de passe: ${error.message}`);
         }
-    }
-
-    static generateTempPassword(length = 12) {
-        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*';
-        let password = '';
-
-        for (let i = 0; i < length; i++) {
-            password += chars.charAt(Math.floor(Math.random() * chars.length));
-        }
-
-        return password;
     }
 }
