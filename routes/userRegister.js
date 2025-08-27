@@ -118,7 +118,7 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
               email,
               password: hashedPassword,
               role: 'ETUDIANT',
-              temporaryPassword: null,
+              tempPassword: null,
               requirePasswordChange: false,
               etudiant: {
                 create: {
@@ -190,7 +190,7 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
               email,
               password: hashedPassword,
               role: 'ETUDIANT',
-              temporaryPassword: null,
+              tempPassword: null,
               requirePasswordChange: false
             }
           });
