@@ -1,28 +1,122 @@
+// routes/code.js
 import express from 'express';
-import prisma from '../prisma.js';
-import { authenticateToken } from '../middlewares/auth.js';
+import { PrismaClient } from '@prisma/client';
+import { authenticateToken, authorizeRoles } from '../middleware/auth.js';
 
+const prisma = new PrismaClient();
 const router = express.Router();
 
-
-/**
- * POST /code/generate
- * Génère des codes d'inscription uniques
- */
-router.post('/generate', authenticateToken, async (req, res) => {
+// GET /code/list - Liste tous les codes avec pagination
+router.get('/list', authenticateToken, authorizeRoles(['ADMIN', 'PROFESSEUR']), async (req, res) => {
     try {
-        // Vérification du rôle admin
-        if (req.user.role !== 'ADMIN') {
-            return res.status(403).json({
-                success: false,
-                message: 'Seuls les administrateurs peuvent générer des codes'
-            });
+        const { page = 1, limit = 10, search = '', status = 'all' } = req.query;
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+
+        // Construction du filtre WHERE
+        let whereClause = {};
+
+        // Filtre de recherche
+        if (search) {
+            whereClause.OR = [
+                { code: { contains: search, mode: 'insensitive' } },
+                {
+                    generatedByUser: {
+                        OR: [
+                            { nom: { contains: search, mode: 'insensitive' } },
+                            { prenom: { contains: search, mode: 'insensitive' } },
+                            { email: { contains: search, mode: 'insensitive' } }
+                        ]
+                    }
+                },
+                {
+                    usedByUser: {
+                        OR: [
+                            { nom: { contains: search, mode: 'insensitive' } },
+                            { prenom: { contains: search, mode: 'insensitive' } },
+                            { email: { contains: search, mode: 'insensitive' } }
+                        ]
+                    }
+                }
+            ];
         }
 
-        const { quantity } = req.body;
+        // Filtre d'état
+        if (status === 'used') {
+            whereClause.used = true;
+        } else if (status === 'unused') {
+            whereClause.used = false;
+        }
 
-        // Validation
-        if (!quantity || isNaN(quantity) || quantity < 1 || quantity > 100) {
+        const [codes, total] = await Promise.all([
+            prisma.registrationCode.findMany({
+                where: whereClause,
+                skip,
+                take: parseInt(limit),
+                orderBy: { createdAt: 'desc' },
+                include: {
+                    generatedByUser: {
+                        select: {
+                            id: true,
+                            nom: true,
+                            prenom: true,
+                            email: true
+                        }
+                    },
+                    usedByUser: {
+                        select: {
+                            id: true,
+                            nom: true,
+                            prenom: true,
+                            email: true
+                        }
+                    }
+                }
+            }),
+            prisma.registrationCode.count({ where: whereClause })
+        ]);
+
+        res.json({
+            success: true,
+            data: {
+                codes: codes.map(code => ({
+                    id: code.id,
+                    code: code.code,
+                    createdAt: code.createdAt,
+                    expiresAt: code.expiresAt,
+                    used: code.used,
+                    usedAt: code.usedAt,
+                    generatedBy: code.generatedByUser ?
+                        `${code.generatedByUser.prenom} ${code.generatedByUser.nom} (${code.generatedByUser.email})` :
+                        'Système',
+                    usedBy: code.usedByUser ?
+                        `${code.usedByUser.prenom} ${code.usedByUser.nom} (${code.usedByUser.email})` :
+                        null
+                })),
+                pagination: {
+                    current: parseInt(page),
+                    total: Math.ceil(total / limit),
+                    count: codes.length,
+                    totalItems: total
+                }
+            }
+        });
+
+    } catch (err) {
+        console.error("Erreur liste codes:", err);
+        res.status(500).json({
+            success: false,
+            message: "Erreur serveur lors de la récupération des codes"
+        });
+    }
+});
+
+// POST /code/generate - Générer de nouveaux codes
+router.post('/generate', authenticateToken, authorizeRoles(['ADMIN', 'PROFESSEUR']), async (req, res) => {
+    try {
+        const { quantity = 1, expiresInHours = 24 } = req.body;
+        const userId = req.user.id;
+
+        if (quantity < 1 || quantity > 100) {
             return res.status(400).json({
                 success: false,
                 message: 'La quantité doit être entre 1 et 100'
@@ -30,99 +124,44 @@ router.post('/generate', authenticateToken, async (req, res) => {
         }
 
         const codes = [];
-        const batchId = `BATCH-${Date.now()}`;
-
         for (let i = 0; i < quantity; i++) {
             const code = generateRandomCode();
+            const expiresAt = new Date();
+            expiresAt.setHours(expiresAt.getHours() + parseInt(expiresInHours));
 
-            await prisma.registrationCode.create({
+            const newCode = await prisma.registrationCode.create({
                 data: {
                     code,
-                    generatedBy: req.user.id,
-                    isUsed: false
+                    expiresAt,
+                    generatedBy: userId
                 }
             });
-            codes.push(code);
+
+            codes.push(newCode.code);
         }
 
-        // Journalisation de l'activité
-        await prisma.activityLog.create({
-            data: {
-                action: 'CODE_GENERATION',
-                details: `Génération de ${quantity} codes par l'admin ${req.user.email}`,
-                userId: req.user.id
-            }
-        });
-
-        res.json({
+        res.status(201).json({
             success: true,
-            batchId,
-            count: codes.length,
-            codes
+            message: quantity > 1 ? `${quantity} codes générés avec succès` : 'Code généré avec succès',
+            data: { codes }
         });
 
     } catch (err) {
-        console.error("Erreur génération codes:", err);
+        console.error("Erreur génération code:", err);
         res.status(500).json({
             success: false,
-            message: err.message || "Erreur lors de la génération des codes"
+            message: "Erreur serveur lors de la génération du code"
         });
     }
 });
 
+// Fonction pour générer un code aléatoire
 function generateRandomCode() {
     return 'UCAO-' +
         Math.random().toString(36).substring(2, 6).toUpperCase() + '-' +
         Math.random().toString(36).substring(2, 6).toUpperCase();
 }
 
-/**
- * GET /code/codes
- * Liste tous les codes existants avec pagination basique
- */
-router.get('/listes', authenticateToken, async (req, res) => {
-    try {
-        const { page = 1, limit = 50 } = req.query;
-        const skip = (parseInt(page) - 1) * parseInt(limit);
-
-        const [codes, total] = await Promise.all([
-            prisma.registrationCode.findMany({
-                skip,
-                take: parseInt(limit),
-                orderBy: { createdAt: 'desc' },
-                include: {
-                    generatedByUser: {
-                        select: { email: true }
-                    }
-                }
-            }),
-            prisma.registrationCode.count()
-        ]);
-
-        res.json({
-            success: true,
-            count: codes.length,
-            total,
-            page: parseInt(page),
-            pages: Math.ceil(total / limit),
-            codes: codes.map(code => ({
-                code: code.code,
-                createdAt: code.createdAt,
-                expiresAt: code.expiresAt,
-                used: code.used,
-                generatedBy: code.generatedByUser?.email
-            }))
-        });
-
-    } catch (err) {
-        console.error("Erreur code/codes:", err);
-        res.status(500).json({
-            success: false,
-            message: "Erreur serveur"
-        });
-    }
-});
-
-
 
 export default router;
+

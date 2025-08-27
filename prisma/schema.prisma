@@ -57,6 +57,7 @@ model Election {
   description String?
   dateDebut   DateTime
   dateFin     DateTime
+  createdAt   DateTime    @default(now())
   filiere     String?     // Filière concernée (pour niveau 1)
   annee       Int?        // Année concernée (pour niveau 1)
   ecole       String?     // École concernée (pour niveau 2)
@@ -145,16 +146,20 @@ model Admin {
 }
 
 model RegistrationCode {
-  id          Int      @id @default(autoincrement())
+  id          String   @id @default(cuid())
   code        String   @unique
-  isUsed      Boolean  @default(false)
   createdAt   DateTime @default(now())
-  generatedBy Int?
-  usedById    Int?     @unique
+  expiresAt   DateTime
+  used        Boolean  @default(false)
+  usedAt      DateTime?
+  generatedBy String   // ID de l'utilisateur qui a généré le code
+  usedBy      String?  // ID de l'utilisateur qui a utilisé le code
 
-  // Relations avec noms explicites
-  generatedByUser User? @relation("UserGeneratedCodes", fields: [generatedBy], references: [id])
-  usedByUser     User?  @relation("UserUsedCode", fields: [usedById], references: [id])
+  // Relations
+  generatedByUser User? @relation("GeneratedCodes", fields: [generatedBy], references: [id], onDelete: Cascade)
+  usedByUser      User? @relation("UsedCodes", fields: [usedBy], references: [id], onDelete: Cascade)
+
+  @@map("registration_codes")
 }
 
 model VoteToken {
