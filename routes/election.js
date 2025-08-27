@@ -279,13 +279,13 @@ router.delete('/:id', authenticateToken, async (req, res) => {
         const { id } = req.params;
 
         await prisma.election.delete({
-            where: { id: parseInt(id) }
+            where: { id }
         });
-
+        console.log('ID reçu pour suppression:', id);
         res.json({ message: 'Élection supprimée avec succès' });
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Erreur serveur' });
+        console.error('Erreur suppression élection:', error);
+        res.status(500).json({ message: error.message || 'Erreur serveur' });
     }
 });
 
