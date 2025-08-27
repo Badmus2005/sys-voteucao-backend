@@ -3,8 +3,7 @@ import prisma from '../prisma.js';
 import { authenticateToken } from '../middlewares/auth.js';
 
 const router = express.Router();
-const MAX_CODES_PER_REQUEST = 1000;
-const CODE_EXPIRATION_DAYS = 30;
+
 
 /**
  * POST /code/generate
@@ -35,7 +34,7 @@ router.post('/generate', authenticateToken, async (req, res) => {
 
         for (let i = 0; i < quantity; i++) {
             const code = generateRandomCode();
-            
+
             await prisma.registrationCode.create({
                 data: {
                     code,
@@ -72,7 +71,7 @@ router.post('/generate', authenticateToken, async (req, res) => {
 });
 
 function generateRandomCode() {
-    return 'UCAO-' + 
+    return 'UCAO-' +
         Math.random().toString(36).substring(2, 6).toUpperCase() + '-' +
         Math.random().toString(36).substring(2, 6).toUpperCase();
 }
@@ -81,7 +80,7 @@ function generateRandomCode() {
  * GET /code/codes
  * Liste tous les codes existants avec pagination basique
  */
-router.get('/codes', authenticateToken, async (req, res) => {
+router.get('/listes', authenticateToken, async (req, res) => {
     try {
         const { page = 1, limit = 50 } = req.query;
         const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -124,30 +123,6 @@ router.get('/codes', authenticateToken, async (req, res) => {
     }
 });
 
-// Helper function pour générer un code unique
-async function generateUniqueCode() {
-    let code;
-    let exists = true;
-    let attempts = 0;
-    const MAX_ATTEMPTS = 5;
 
-    while (exists && attempts < MAX_ATTEMPTS) {
-        code = 'UCAO-' +
-            Math.random().toString(36).substring(2, 6).toUpperCase() + '-' +
-            Math.random().toString(36).substring(2, 6).toUpperCase();
-
-        const found = await prisma.registrationCode.findUnique({
-            where: { code }
-        });
-        exists = !!found;
-        attempts++;
-    }
-
-    if (exists) {
-        throw new Error('Impossible de générer un code unique après plusieurs tentatives');
-    }
-
-    return code;
-}
 
 export default router;
