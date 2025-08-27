@@ -18,7 +18,7 @@ const transporter = nodemailer.createTransport({
 });
 
 // Route de connexion
-router.post('/', async (req, res) => {
+router.post('/login', async (req, res) => {
     try {
         console.log('=== DÉBUT LOGIN ===');
         console.log('Body reçu:', JSON.stringify(req.body, null, 2));
