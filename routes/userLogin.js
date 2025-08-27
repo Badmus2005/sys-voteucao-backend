@@ -17,7 +17,7 @@ const transporter = nodemailer.createTransport({
     }
 });
 
-// Route de connexion (modifiée pour gérer les identifiants temporaires)
+// Route de connexion
 router.post('/', async (req, res) => {
     try {
         const { email, password, identifiantTemporaire } = req.body;
@@ -32,7 +32,7 @@ router.post('/', async (req, res) => {
             return res.status(400).json({ message: 'Email et mot de passe requis' });
         }
 
-        // Trouver user par email
+        // Trouver user par email (inclure le mot de passe)
         const user = await prisma.user.findUnique({
             where: { email },
             include: {
@@ -42,12 +42,14 @@ router.post('/', async (req, res) => {
         });
 
         if (!user) {
-            return res.status(400).json({ message: 'Utilisateur non trouvé' });
+            // Pour des raisons de sécurité, ne pas révéler si l'email existe
+            return res.status(401).json({ message: 'Email ou mot de passe incorrect' });
         }
 
+        // Vérifier le mot de passe
         const validPassword = await bcrypt.compare(password, user.password);
         if (!validPassword) {
-            return res.status(400).json({ message: 'Mot de passe incorrect' });
+            return res.status(401).json({ message: 'Email ou mot de passe incorrect' });
         }
 
         // Générer JWT
@@ -61,15 +63,15 @@ router.post('/', async (req, res) => {
             { expiresIn: '8h' }
         );
 
-        // Préparer la réponse
+        // Préparer la réponse (sans données sensibles)
         const response = {
             message: 'Connexion réussie',
             token,
+            requirePasswordChange: user.requirePasswordChange,
             user: {
                 id: user.id,
                 email: user.email,
-                role: user.role,
-                requirePasswordChange: user.requirePasswordChange
+                role: user.role
             }
         };
 
@@ -78,10 +80,7 @@ router.post('/', async (req, res) => {
             response.user.etudiant = {
                 id: user.etudiant.id,
                 nom: user.etudiant.nom,
-                prenom: user.etudiant.prenom,
-                matricule: user.etudiant.matricule,
-                filiere: user.etudiant.filiere,
-                annee: user.etudiant.annee
+                prenom: user.etudiant.prenom
             };
         }
 
@@ -89,16 +88,15 @@ router.post('/', async (req, res) => {
             response.user.admin = {
                 id: user.admin.id,
                 nom: user.admin.nom,
-                prenom: user.admin.prenom,
-                poste: user.admin.poste
+                prenom: user.admin.prenom
             };
         }
 
         res.json(response);
 
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Erreur serveur' });
+        console.error('Erreur login:', error);
+        res.status(500).json({ message: 'Erreur serveur lors de la connexion' });
     }
 });
 
