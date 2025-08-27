@@ -84,14 +84,23 @@ const rateLimit = (options) => {
 
 router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, res) => {
   try {
-    const { email, password, nom, prenom, filiere, annee, code, matricule } = req.body;
-    const anneeInt = parseInt(annee, 10);
+    const { email, password, nom, prenom, filiere, annee, code, matricule, ecole } = req.body;
 
     // Validation de base
-    if (!email || !password || !nom || !prenom || !filiere || !annee) {
+    if (!email || !password || !nom || !prenom || !filiere || !annee || !ecole) {
       return res.status(400).json({
         success: false,
         message: 'Tous les champs obligatoires sont requis.'
+      });
+    }
+
+    // Conversion de l'année en nombre
+    const anneeInt = parseInt(annee, 10);
+
+    if (isNaN(anneeInt) || anneeInt < 1 || anneeInt > 3) {
+      return res.status(400).json({
+        success: false,
+        message: "L'année doit être entre 1 et 3."
       });
     }
 
@@ -106,13 +115,6 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
       return res.status(400).json({
         success: false,
         message: 'Le mot de passe doit contenir 8+ caractères, 1 majuscule, 1 chiffre et 1 caractère spécial.'
-      });
-    }
-
-    if (anneeInt < 1 || anneeInt > 3) {
-      return res.status(400).json({
-        success: false,
-        message: "L'année doit être entre 1 et 3."
       });
     }
 
@@ -164,11 +166,12 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
                 create: {
                   nom,
                   prenom,
-                  identifiantTemporaire: temporaryIdentifiant, // Identifiant temporaire
+                  identifiantTemporaire: temporaryIdentifiant,
                   filiere,
                   annee: anneeInt,
                   codeInscription: code,
-                  matricule: null // Pas de matricule pour 1ère année
+                  matricule: null,
+                  ecole
                 }
               }
             },
@@ -199,7 +202,8 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
               prenom: createdUser.etudiant.prenom,
               identifiantTemporaire: createdUser.etudiant.identifiantTemporaire,
               filiere: createdUser.etudiant.filiere,
-              annee: createdUser.etudiant.annee
+              annee: createdUser.etudiant.annee,
+              ecole: createdUser.etudiant.ecole
             },
             temporaryCredentials: {
               identifiant: temporaryIdentifiant,
@@ -213,7 +217,8 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
         logger.error('Erreur transaction 1ère année', txError);
         return res.status(500).json({
           success: false,
-          message: 'Erreur lors de l\'inscription.'
+          message: 'Erreur lors de l\'inscription.',
+          error: process.env.NODE_ENV === 'development' ? txError.message : undefined
         });
       }
     }
@@ -267,10 +272,10 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
               userId: user.id,
               nom,
               prenom,
-              identifiantTemporaire: temporaryIdentifiant, // Identifiant temporaire
+              identifiantTemporaire: temporaryIdentifiant,
               filiere,
               annee: anneeInt,
-              codeInscription: null // Pas de code d'inscription pour années supérieures
+              codeInscription: null
             }
           });
 
@@ -294,7 +299,8 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
               matricule,
               identifiantTemporaire: temporaryIdentifiant,
               filiere,
-              annee: anneeInt
+              annee: anneeInt,
+              ecole
             },
             temporaryCredentials: {
               identifiant: temporaryIdentifiant,
@@ -308,7 +314,8 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
         logger.error('Erreur transaction années supérieures', txError);
         return res.status(500).json({
           success: false,
-          message: 'Erreur lors de l\'association du matricule.'
+          message: 'Erreur lors de l\'association du matricule.',
+          error: process.env.NODE_ENV === 'development' ? txError.message : undefined
         });
       }
     }
@@ -317,7 +324,8 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
     logger.error('Erreur inscription', err);
     return res.status(500).json({
       success: false,
-      message: 'Une erreur serveur est survenue.'
+      message: 'Une erreur serveur est survenue.',
+      error: process.env.NODE_ENV === 'development' ? err.message : undefined
     });
   }
 });
