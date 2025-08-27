@@ -16,9 +16,15 @@ const transporter = nodemailer.createTransport({
         pass: process.env.EMAIL_PASSWORD
     }
 });
+const rateLimit = require('express-rate-limit');
 
+const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 5, // Limite à 5 tentatives par fenêtre
+    message: 'Trop de tentatives de connexion, veuillez réessayer plus tard'
+});
 // Route de connexion
-router.post('/', async (req, res) => {
+router.post('/', loginLimiter, async (req, res) => {
     try {
         console.log('=== DÉBUT LOGIN ===');
         console.log('Body reçu:', JSON.stringify(req.body, null, 2));
