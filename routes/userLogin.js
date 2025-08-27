@@ -19,15 +19,15 @@ const transporter = nodemailer.createTransport({
 });
 
 
-// Route de connexion
+// Route de connexion 
 router.post('/', async (req, res) => {
     try {
         console.log('=== DÉBUT LOGIN ===');
         console.log('Body reçu:', JSON.stringify(req.body, null, 2));
-        console.log('Headers:', req.headers);
 
         const { email, password, identifiantTemporaire } = req.body;
 
+        // Si identifiant temporaire est fourni, utiliser cette méthode
         if (identifiantTemporaire) {
             console.log('Tentative avec identifiant temporaire');
             return handleTemporaryLogin(req, res);
@@ -54,13 +54,15 @@ router.post('/', async (req, res) => {
         }
 
         console.log('Utilisateur trouvé:', user.email);
-        console.log('Mot de passe hashé en DB:', user.password);
-        console.log('Mot de passe fourni:', password);
 
-        // DEBUG: Vérification manuelle du hash
-        const testHash = await bcrypt.hash(password, 10);
-        console.log('Nouveau hash du mot de passe fourni:', testHash);
-        console.log('Les hashs correspondent:', await bcrypt.compare(password, user.password));
+        // VÉRIFICATION CRITIQUE: Si l'utilisateur a besoin de changer son mot de passe
+        // et qu'il a un mot de passe temporaire, on refuse la connexion normale
+        if (user.requirePasswordChange && user.tempPassword) {
+            console.log('Connexion normale refusée - Mot de passe temporaire actif');
+            return res.status(401).json({
+                message: 'Votre compte a été réinitialisé. Utilisez vos identifiants temporaires ou réinitialisez votre mot de passe.'
+            });
+        }
 
         const validPassword = await bcrypt.compare(password, user.password);
         console.log('Résultat bcrypt.compare:', validPassword);
@@ -72,7 +74,6 @@ router.post('/', async (req, res) => {
 
         console.log('Connexion réussie pour:', user.email);
 
-        // Reste du code...
         const token = jwt.sign(
             {
                 id: user.id,
@@ -99,7 +100,6 @@ router.post('/', async (req, res) => {
 
     } catch (error) {
         console.error('ERREUR LOGIN:', error);
-        console.error('Stack:', error.stack);
         res.status(500).json({ message: 'Erreur serveur lors de la connexion' });
     }
 });
@@ -163,7 +163,7 @@ const handleTemporaryLogin = async (req, res) => {
     }
 };
 
-// Nouvelle route pour changement de mot de passe après réinitialisation
+// Route pour changer le mot de passe après réinitialisation
 router.post('/change-password-temporary', authenticateToken, async (req, res) => {
     try {
         const { newPassword, confirmPassword, currentPassword } = req.body;
@@ -199,7 +199,7 @@ router.post('/change-password-temporary', authenticateToken, async (req, res) =>
             return res.status(401).json({ message: 'Mot de passe temporaire incorrect' });
         }
 
-        // Changer le mot de passe
+        // Changer le mot de passe et réactiver le compte
         await PasswordResetService.completePasswordReset(user.id, newPassword);
 
         // Régénérer le token sans le flag de changement

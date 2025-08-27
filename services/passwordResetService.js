@@ -24,13 +24,15 @@ export class PasswordResetService {
 
             // Mettre à jour l'étudiant et l'utilisateur
             const updatedStudent = await prisma.$transaction(async (tx) => {
-                // Mettre à jour l'utilisateur
+                // Mettre à jour l'utilisateur - DÉSACTIVER LE MOT DE PASSE PRINCIPAL
                 await tx.user.update({
                     where: { id: student.user.id },
                     data: {
                         tempPassword: await bcrypt.hash(temporaryPassword, 10),
                         requirePasswordChange: true,
-                        passwordResetExpires: expirationDate
+                        passwordResetExpires: expirationDate,
+                        // Désactiver temporairement le mot de passe principal
+                        password: await bcrypt.hash(`disabled_${Date.now()}`, 10)
                     }
                 });
 
@@ -64,7 +66,7 @@ export class PasswordResetService {
                 student: {
                     nom: updatedStudent.nom,
                     prenom: updatedStudent.prenom,
-                    matricule: updatedStudent.matricule // Utiliser le matricule permanent
+                    matricule: updatedStudent.matricule
                 }
             };
 
@@ -114,7 +116,7 @@ export class PasswordResetService {
                 prisma.user.update({
                     where: { id: userId },
                     data: {
-                        password: hashedPassword,
+                        password: hashedPassword, // Réactiver le mot de passe principal
                         tempPassword: null,
                         requirePasswordChange: false,
                         passwordResetExpires: null
