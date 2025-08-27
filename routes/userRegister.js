@@ -4,7 +4,7 @@ import prisma from '../prisma.js';
 
 const router = express.Router();
 
-// Génère un identifiant temporaire stable (créé à l'inscription, utilisé uniquement si reset)
+// Génère un identifiant temporaire stable
 const generateTemporaryIdentifiant = () => {
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
   let identifiant = '';
@@ -12,12 +12,17 @@ const generateTemporaryIdentifiant = () => {
   return `TEMP${identifiant}`;
 };
 
-// Validations simples
-const validateEmail = (email) =>
-  /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) && !/[<>"'`]/.test(email);
+// Validations
+const validateEmail = (email) => {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+  const forbiddenChars = /[<>"'`]/;
+  return emailRegex.test(email) && !forbiddenChars.test(email);
+};
 
 const validatePassword = (password) =>
   password.length >= 8 && /[A-Z]/.test(password) && /[0-9]/.test(password) && /[!@#$%^&*(),.?":{}|<>]/.test(password);
+
+const validateText = (text) => !/[<>"'`]/.test(text);
 
 // Logger minimal
 const logger = {
@@ -25,7 +30,7 @@ const logger = {
   error: (m, e) => console.error(`[ERROR] ${m}`, { error: e.message, stack: e.stack, at: new Date().toISOString() })
 };
 
-// Rate limit très simple
+// Rate limit
 const rateLimit = (options) => {
   const requests = new Map();
   return (req, res, next) => {
@@ -50,24 +55,39 @@ const rateLimit = (options) => {
 
 router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, res) => {
   try {
-    const { email, password, nom, prenom, filiere, annee, code, matricule, ecole } = req.body;
+    const { email, password, confirmPassword, nom, prenom, filiere, annee, code, matricule, ecole } = req.body;
 
     // Champs obligatoires
-    if (!email || !password || !nom || !prenom || !filiere || !annee || !ecole) {
+    if (!email || !password || !confirmPassword || !nom || !prenom || !filiere || !annee || !ecole) {
       return res.status(400).json({ success: false, message: 'Tous les champs obligatoires sont requis.' });
+    }
+
+    // Validation des mots de passe identiques
+    if (password !== confirmPassword) {
+      return res.status(400).json({ success: false, message: 'Les mots de passe ne correspondent pas.' });
     }
 
     const anneeInt = Number.parseInt(annee, 10);
     if (!Number.isInteger(anneeInt) || anneeInt < 1 || anneeInt > 3) {
       return res.status(400).json({ success: false, message: "L'année doit être entre 1 et 3." });
     }
+
     if (!validateEmail(email)) {
       return res.status(400).json({ success: false, message: 'Format email invalide.' });
     }
+
     if (!validatePassword(password)) {
       return res.status(400).json({
         success: false,
         message: 'Le mot de passe doit contenir 8+ caractères, 1 majuscule, 1 chiffre et 1 caractère spécial.'
+      });
+    }
+
+    // Validation des champs texte
+    if (!validateText(nom) || !validateText(prenom) || !validateText(filiere) || !validateText(ecole)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Le nom, prénom, filière et école ne doivent pas contenir de caractères spéciaux.'
       });
     }
 
@@ -79,10 +99,7 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // ————————————————————————————————————————————————————————————————
-    // 1) 1ère année : code d'inscription —> crée user avec password normal,
-    //    génère identifiantTemporaire, PAS de temporaryPassword.
-    // ————————————————————————————————————————————————————————————————
+    // 1ère année : code d'inscription
     if (anneeInt === 1) {
       if (!code) {
         return res.status(400).json({ success: false, message: "Code d'inscription requis pour la 1ère année." });
@@ -101,8 +118,8 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
               email,
               password: hashedPassword,
               role: 'ETUDIANT',
-              temporaryPassword: null,           // <— important
-              requirePasswordChange: false,      // <— important
+              temporaryPassword: null,
+              requirePasswordChange: false,
               etudiant: {
                 create: {
                   nom,
@@ -142,7 +159,6 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
               annee: createdUser.etudiant.annee,
               ecole: createdUser.etudiant.ecole
             }
-            // ⛔️ Pas de credentials temporaires renvoyés à la création
           }
         });
       } catch (txError) {
@@ -151,10 +167,7 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
       }
     }
 
-    // ————————————————————————————————————————————————————————————————
-    // 2) 2e/3e année : via matricule —> compte lié existant, password normal,
-    //    identifiantTemporaire généré si absent, PAS de temporaryPassword.
-    // ————————————————————————————————————————————————————————————————
+    // 2e/3e année : via matricule
     if (anneeInt >= 2 && anneeInt <= 3) {
       if (!matricule) {
         return res.status(400).json({ success: false, message: 'Matricule requis pour les années supérieures.' });
@@ -175,7 +188,7 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
           const user = await tx.user.create({
             data: {
               email,
-              password: hashedPassword,          // <— password normal choisi à l’inscription
+              password: hashedPassword,
               role: 'ETUDIANT',
               temporaryPassword: null,
               requirePasswordChange: false
@@ -215,7 +228,6 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
               annee: anneeInt,
               ecole
             }
-            // ⛔️ Pas de credentials temporaires renvoyés à la création
           }
         });
       } catch (txError) {
