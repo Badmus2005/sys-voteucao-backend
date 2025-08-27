@@ -5,6 +5,7 @@ import nodemailer from 'nodemailer';
 import prisma from '../prisma.js';
 import { authenticateToken } from '../middlewares/auth.js';
 import { PasswordResetService } from '../services/passwordResetService.js';
+import rateLimit from 'limite-de-taux-express';
 
 const router = express.Router();
 
@@ -16,7 +17,7 @@ const transporter = nodemailer.createTransport({
         pass: process.env.EMAIL_PASSWORD
     }
 });
-const rateLimit = require('express-rate-limit');
+
 
 const loginLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
