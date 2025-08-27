@@ -20,19 +20,24 @@ const transporter = nodemailer.createTransport({
 // Route de connexion
 router.post('/', async (req, res) => {
     try {
+        console.log('=== DÉBUT LOGIN ===');
+        console.log('Body reçu:', JSON.stringify(req.body, null, 2));
+        console.log('Headers:', req.headers);
+
         const { email, password, identifiantTemporaire } = req.body;
 
-        // Connexion avec identifiants temporaires
         if (identifiantTemporaire) {
+            console.log('Tentative avec identifiant temporaire');
             return handleTemporaryLogin(req, res);
         }
 
-        // Connexion normale avec email
         if (!email || !password) {
+            console.log('Champs manquants');
             return res.status(400).json({ message: 'Email et mot de passe requis' });
         }
 
-        // Trouver user par email (inclure le mot de passe)
+        console.log('Recherche utilisateur avec email:', email);
+
         const user = await prisma.user.findUnique({
             where: { email },
             include: {
@@ -42,17 +47,30 @@ router.post('/', async (req, res) => {
         });
 
         if (!user) {
-            // Pour des raisons de sécurité, ne pas révéler si l'email existe
+            console.log('Utilisateur non trouvé');
             return res.status(401).json({ message: 'Email ou mot de passe incorrect' });
         }
 
-        // Vérifier le mot de passe
+        console.log('Utilisateur trouvé:', user.email);
+        console.log('Mot de passe hashé en DB:', user.password);
+        console.log('Mot de passe fourni:', password);
+
+        // DEBUG: Vérification manuelle du hash
+        const testHash = await bcrypt.hash(password, 10);
+        console.log('Nouveau hash du mot de passe fourni:', testHash);
+        console.log('Les hashs correspondent:', await bcrypt.compare(password, user.password));
+
         const validPassword = await bcrypt.compare(password, user.password);
+        console.log('Résultat bcrypt.compare:', validPassword);
+
         if (!validPassword) {
+            console.log('Mot de passe invalide');
             return res.status(401).json({ message: 'Email ou mot de passe incorrect' });
         }
 
-        // Générer JWT
+        console.log('Connexion réussie pour:', user.email);
+
+        // Reste du code...
         const token = jwt.sign(
             {
                 id: user.id,
@@ -63,7 +81,6 @@ router.post('/', async (req, res) => {
             { expiresIn: '8h' }
         );
 
-        // Préparer la réponse (sans données sensibles)
         const response = {
             message: 'Connexion réussie',
             token,
@@ -75,27 +92,12 @@ router.post('/', async (req, res) => {
             }
         };
 
-        // Ajouter les informations spécifiques selon le rôle
-        if (user.role === 'ETUDIANT' && user.etudiant) {
-            response.user.etudiant = {
-                id: user.etudiant.id,
-                nom: user.etudiant.nom,
-                prenom: user.etudiant.prenom
-            };
-        }
-
-        if (user.role === 'ADMIN' && user.admin) {
-            response.user.admin = {
-                id: user.admin.id,
-                nom: user.admin.nom,
-                prenom: user.admin.prenom
-            };
-        }
-
         res.json(response);
+        console.log('=== FIN LOGIN SUCCÈS ===');
 
     } catch (error) {
-        console.error('Erreur login:', error);
+        console.error('ERREUR LOGIN:', error);
+        console.error('Stack:', error.stack);
         res.status(500).json({ message: 'Erreur serveur lors de la connexion' });
     }
 });
