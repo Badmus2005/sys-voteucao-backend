@@ -16,13 +16,9 @@ const transporter = nodemailer.createTransport({
         pass: process.env.EMAIL_PASSWORD
     }
 });
-router.post('/', async (req, res) => {
-    console.log('Requête POST reçue sur /api/userLogin');
-    res.send('Login route OK');
-});
 
 // Route de connexion
-router.post('/login', async (req, res) => {
+router.post('/', async (req, res) => {
     try {
         console.log('=== DÉBUT LOGIN ===');
         console.log('Body reçu:', JSON.stringify(req.body, null, 2));
