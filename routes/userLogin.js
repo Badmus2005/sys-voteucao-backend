@@ -18,7 +18,7 @@ const transporter = nodemailer.createTransport({
 });
 
 // Route de connexion
-router.post('/', async (req, res) => {
+router.post('/login', async (req, res) => {
     try {
         console.log('=== DÉBUT LOGIN ===');
         console.log('Body reçu:', JSON.stringify(req.body, null, 2));
@@ -103,6 +103,10 @@ router.post('/', async (req, res) => {
 });
 
 router.get('/test', (req, res) => res.send('OK'));
+
+router.get('/', (req, res) => {
+    res.send('Route GET userLogin OK');
+});
 
 
 // Gestion de la connexion avec identifiants temporaires
