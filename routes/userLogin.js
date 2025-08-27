@@ -5,7 +5,7 @@ import nodemailer from 'nodemailer';
 import prisma from '../prisma.js';
 import { authenticateToken } from '../middlewares/auth.js';
 import { PasswordResetService } from '../services/passwordResetService.js';
-import rateLimit from 'limite-de-taux-express';
+
 
 const router = express.Router();
 
@@ -19,13 +19,8 @@ const transporter = nodemailer.createTransport({
 });
 
 
-const loginLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 5, // Limite à 5 tentatives par fenêtre
-    message: 'Trop de tentatives de connexion, veuillez réessayer plus tard'
-});
 // Route de connexion
-router.post('/', loginLimiter, async (req, res) => {
+router.post('/', async (req, res) => {
     try {
         console.log('=== DÉBUT LOGIN ===');
         console.log('Body reçu:', JSON.stringify(req.body, null, 2));
