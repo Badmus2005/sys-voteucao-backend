@@ -15,24 +15,28 @@ datasource db {
 }
 
 model User {
-  id                Int               @id @default(autoincrement())
-  email             String            @unique
-  password          String
-  role              Role              @default(ADMIN)
-  createdAt         DateTime          @default(now())
-  tempPassword          String?                            // Mot de passe temporaire
-  requirePasswordChange Boolean @default(false)           // Force le changement au prochain login
-  passwordResetExpires  DateTime?                        // Date d'expiration du mot de passe temporaire
-  etudiant          Etudiant?         @relation("UserToEtudiant")
-  admin             Admin?            @relation("UserToAdmin")
-  votes             Vote[]
-  candidates        Candidate[]
-  generatedCodes    RegistrationCode[] @relation("UserGeneratedCodes")
-  usedRegistrationCode RegistrationCode? @relation("UserUsedCode")
-  voteTokens        VoteToken[]
-  activityLogs      ActivityLog[]     @relation("UserActivityLogs")
-  notifications     Notification[]
+  id                   String   @id @default(cuid()) 
+  email                String   @unique
+  password             String
+  role                 Role     @default(ADMIN)
+  createdAt            DateTime @default(now())
+  tempPassword         String?
+  requirePasswordChange Boolean @default(false)
+  passwordResetExpires DateTime?
+
+  etudiant             Etudiant? @relation("UserToEtudiant")
+  admin                Admin?    @relation("UserToAdmin")
+  votes                Vote[]
+  candidates           Candidate[]
+
+  generatedCodes       RegistrationCode[] @relation("GeneratedCodes") 
+  usedRegistrationCode RegistrationCode?  @relation("UsedCodes")       
+
+  voteTokens           VoteToken[]
+  activityLogs         ActivityLog[] @relation("UserActivityLogs")
+  notifications        Notification[]
 }
+
 
 model Etudiant {
   id              Int     @id @default(autoincrement())
@@ -152,15 +156,16 @@ model RegistrationCode {
   expiresAt   DateTime
   used        Boolean  @default(false)
   usedAt      DateTime?
-  generatedBy String   // ID de l'utilisateur qui a généré le code
-  usedBy      String?  // ID de l'utilisateur qui a utilisé le code
 
-  // Relations
-  generatedByUser User? @relation("GeneratedCodes", fields: [generatedBy], references: [id], onDelete: Cascade)
+  generatedBy String   
+  usedBy      String?  
+
+  generatedByUser User @relation("GeneratedCodes", fields: [generatedBy], references: [id], onDelete: Cascade)
   usedByUser      User? @relation("UsedCodes", fields: [usedBy], references: [id], onDelete: Cascade)
 
   @@map("registration_codes")
 }
+
 
 model VoteToken {
   id          Int       @id @default(autoincrement())
