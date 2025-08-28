@@ -103,37 +103,14 @@ export const getAllStudents = async (req, res) => {
     try {
         const { page = 1, limit = 10, search = '' } = req.query;
 
-        const whereClause = search
-            ? {
-                OR: [
-                    { nom: { contains: search, mode: 'insensitive' } },
-                    { prenom: { contains: search, mode: 'insensitive' } },
-                    { matricule: { contains: search, mode: 'insensitive' } },
-                    { codeInscription: { contains: search, mode: 'insensitive' } },
-                    { filiere: { contains: search, mode: 'insensitive' } }
-                ]
-            }
-            : {};
+        // Version simplifiée sans filtres complexes
+        const students = await prisma.etudiant.findMany({
+            skip: (parseInt(page) - 1) * parseInt(limit),
+            take: parseInt(limit),
+            orderBy: { nom: 'asc' }
+        });
 
-        const [students, total] = await Promise.all([
-            prisma.etudiant.findMany({
-                where: whereClause,
-                include: {
-                    user: {
-                        select: {
-                            id: true,
-                            email: true,
-                            actif: true,
-                            requirePasswordChange: true
-                        }
-                    }
-                },
-                skip: (parseInt(page) - 1) * parseInt(limit),
-                take: parseInt(limit),
-                orderBy: { nom: 'asc' }
-            }),
-            prisma.etudiant.count({ where: whereClause })
-        ]);
+        const total = await prisma.etudiant.count();
 
         return res.json({
             success: true,
@@ -147,12 +124,12 @@ export const getAllStudents = async (req, res) => {
                 }
             }
         });
+
     } catch (error) {
-        console.error('Erreur liste étudiants:', error);
+        console.error('Erreur:', error);
         return res.status(500).json({
             success: false,
-            message: 'Erreur lors de la récupération des étudiants',
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+            message: 'Erreur serveur'
         });
     }
 };
