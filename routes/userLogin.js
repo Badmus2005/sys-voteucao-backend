@@ -101,9 +101,16 @@ router.post('/', async (req, res) => {
             data: {
                 token,
                 requirePasswordChange: user.requirePasswordChange || false,
-                user: { id: user.id, email: user.email, role: user.role }
+                user: {
+                    id: user.id,
+                    email: user.email,
+                    role: user.role,
+                    nom: user.etudiant?.nom || '',
+                    prenom: user.etudiant?.prenom || ''
+                }
             }
         });
+
         console.log('=== FIN LOGIN SUCCÈS ===');
     } catch (error) {
         console.error('ERREUR LOGIN:', error);
