@@ -82,13 +82,18 @@ router.post('/', async (req, res) => {
             console.log('Mot de passe invalide');
             return res.status(401).json({ success: false, message: 'Identifiants invalides' });
         }
+        // Génération du token JWT
 
-        // Issue token
         const token = jwt.sign(
-            { id: user.id, role: user.role, requirePasswordChange: user.requirePasswordChange },
-            JWT_SECRET,
-            { expiresIn: JWT_EXPIRES_NORMAL }
+            {
+                id: user.id,
+                role: user.role,
+                requirePasswordChange: user.requirePasswordChange || false
+            },
+            process.env.JWT_SECRET,
+            { expiresIn: '8h' }
         );
+
 
         res.json({
             success: true,

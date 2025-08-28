@@ -23,12 +23,17 @@ router.post('/', async (req, res) => {
         if (!validPassword)
             return res.status(400).json({ message: 'Mot de passe incorrect' });
 
-        // Générer JWT
+        // Génération du token JWT
         const token = jwt.sign(
-            { id: user.id, role: user.role },
+            {
+                id: user.id,
+                role: user.role,
+                requirePasswordChange: user.requirePasswordChange || false
+            },
             process.env.JWT_SECRET,
             { expiresIn: '8h' }
         );
+
 
         res.json({ message: 'Connexion réussie', token });
     } catch (error) {
