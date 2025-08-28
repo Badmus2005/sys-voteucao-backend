@@ -3,7 +3,7 @@ import { ACADEMIC } from '../shared/academicData.js';
 
 const router = express.Router();
 
-router.get('/config-academic', (req, res) => {
+router.get('/config-academic', authenticateToken, (req, res) => {
     try {
         const filieres = Object.values(ACADEMIC.ECOLES).flat();
         const ecoles = Object.keys(ACADEMIC.ECOLES);
