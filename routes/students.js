@@ -18,7 +18,7 @@ router.get(
     getAllStudents
 );
 
-// PUT /api/students/:id/status - Activer/désactiver un étudiant
+// PUT /api/students/:id/status - 
 router.put('/:id/status', authenticateToken, requireAdmin, async (req, res) => {
     try {
         const { id } = req.params;

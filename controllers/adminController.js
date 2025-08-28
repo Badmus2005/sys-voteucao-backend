@@ -17,9 +17,9 @@ export const resetStudentAccess = async (req, res) => {
             data: {
                 temporaryIdentifiant: temporaryCredentials.temporaryIdentifiant,
                 temporaryPassword: temporaryCredentials.temporaryPassword,
-                requirePasswordChange: true, // 🔥 flag pour frontend
+                requirePasswordChange: true,
                 student: {
-                    id: temporaryCredentials.student.id,
+                    id: parseInt(studentId),
                     nom: temporaryCredentials.student.nom,
                     prenom: temporaryCredentials.student.prenom,
                     matricule: temporaryCredentials.student.matricule
