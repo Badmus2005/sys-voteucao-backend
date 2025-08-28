@@ -100,6 +100,7 @@ export const getStudentByCodeInscription = async (req, res) => {
 
 // Liste avec pagination + recherche
 export const getAllStudents = async (req, res) => {
+    console.log('Requête reçue pour /students');
     try {
         const { page = 1, limit = 10, search = '' } = req.query;
 
