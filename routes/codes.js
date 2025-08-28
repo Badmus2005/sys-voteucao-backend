@@ -1,13 +1,13 @@
 // routes/code.js
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
-import { authenticateToken, authorizeRoles } from '../middlewares/auth.js';
+import { authenticateToken, requireRoles } from '../middlewares/auth.js';
 
 const prisma = new PrismaClient();
 const router = express.Router();
 
 // GET /code/list - Liste tous les codes avec pagination
-router.get('/list', authenticateToken, authorizeRoles(['ADMIN', 'PROFESSEUR']), async (req, res) => {
+router.get('/list', authenticateToken, requireRoles('ADMIN'), async (req, res) => {
     try {
         const { page = 1, limit = 10, search = '', status = 'all' } = req.query;
         const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -111,7 +111,7 @@ router.get('/list', authenticateToken, authorizeRoles(['ADMIN', 'PROFESSEUR']), 
 });
 
 // POST /code/generate - Générer de nouveaux codes
-router.post('/generate', authenticateToken, authorizeRoles(['ADMIN', 'PROFESSEUR']), async (req, res) => {
+router.post('/generate', authenticateToken, requireRoles('ADMIN'), async (req, res) => {
     try {
         const { quantity = 1, expiresInHours = 24 } = req.body;
         const userId = req.user.id;
