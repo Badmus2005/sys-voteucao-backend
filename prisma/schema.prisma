@@ -88,6 +88,7 @@ model Candidate {
   photoUrl   String?
   userId     String
   electionId Int
+  createdAt  DateTime @default(now())
 
   election   Election  @relation(fields: [electionId], references: [id])
   user       User      @relation(fields: [userId], references: [id])

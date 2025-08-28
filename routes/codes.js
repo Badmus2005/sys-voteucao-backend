@@ -21,20 +21,24 @@ router.get('/list', authenticateToken, requireRole('ADMIN'), async (req, res) =>
                 { code: { contains: search, mode: 'insensitive' } },
                 {
                     generatedByUser: {
-                        OR: [
-                            { nom: { contains: search, mode: 'insensitive' } },
-                            { prenom: { contains: search, mode: 'insensitive' } },
-                            { email: { contains: search, mode: 'insensitive' } }
-                        ]
+                        is: {
+                            OR: [
+                                { nom: { contains: search, mode: 'insensitive' } },
+                                { prenom: { contains: search, mode: 'insensitive' } },
+                                { email: { contains: search, mode: 'insensitive' } }
+                            ]
+                        }
                     }
                 },
                 {
                     usedByUser: {
-                        OR: [
-                            { nom: { contains: search, mode: 'insensitive' } },
-                            { prenom: { contains: search, mode: 'insensitive' } },
-                            { email: { contains: search, mode: 'insensitive' } }
-                        ]
+                        is: {
+                            OR: [
+                                { nom: { contains: search, mode: 'insensitive' } },
+                                { prenom: { contains: search, mode: 'insensitive' } },
+                                { email: { contains: search, mode: 'insensitive' } }
+                            ]
+                        }
                     }
                 }
             ];
@@ -55,18 +59,31 @@ router.get('/list', authenticateToken, requireRole('ADMIN'), async (req, res) =>
                 orderBy: { createdAt: 'desc' },
                 include: {
                     generatedByUser: {
+                        include: {
+                            admin: {
+                                select: {
+                                    nom: true,
+                                    prenom: true
+                                }
+                            }
+                        },
                         select: {
                             id: true,
-                            nom: true,
-                            prenom: true,
                             email: true
                         }
                     },
+
                     usedByUser: {
+                        include: {
+                            etudiant: {
+                                select: {
+                                    nom: true,
+                                    prenom: true
+                                }
+                            }
+                        },
                         select: {
                             id: true,
-                            nom: true,
-                            prenom: true,
                             email: true
                         }
                     }
@@ -85,12 +102,13 @@ router.get('/list', authenticateToken, requireRole('ADMIN'), async (req, res) =>
                     expiresAt: code.expiresAt,
                     used: code.used,
                     usedAt: code.usedAt,
-                    generatedBy: code.generatedByUser ?
-                        `${code.generatedByUser.prenom} ${code.generatedByUser.nom} (${code.generatedByUser.email})` :
-                        'Système',
-                    usedBy: code.usedByUser ?
-                        `${code.usedByUser.prenom} ${code.usedByUser.nom} (${code.usedByUser.email})` :
-                        null
+                    generatedBy: code.generatedByUser?.admin
+                        ? `${code.generatedByUser.admin.prenom} ${code.generatedByUser.admin.nom} (${code.generatedByUser.email})`
+                        : 'Système',
+                    usedBy: code.usedByUser?.etudiant
+                        ? `${code.usedByUser.etudiant.prenom} ${code.usedByUser.etudiant.nom} (${code.usedByUser.email})`
+                        : null
+
                 })),
                 pagination: {
                     current: parseInt(page),
