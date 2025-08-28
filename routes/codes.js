@@ -60,33 +60,15 @@ router.get('/list', authenticateToken, requireRole('ADMIN'), async (req, res) =>
                 include: {
                     generatedByUser: {
                         include: {
-                            admin: {
-                                select: {
-                                    nom: true,
-                                    prenom: true
-                                }
-                            }
-                        },
-                        select: {
-                            id: true,
-                            email: true
+                            admin: true
                         }
                     },
-
                     usedByUser: {
                         include: {
-                            etudiant: {
-                                select: {
-                                    nom: true,
-                                    prenom: true
-                                }
-                            }
-                        },
-                        select: {
-                            id: true,
-                            email: true
+                            etudiant: true
                         }
                     }
+
                 }
             }),
             prisma.registrationCode.count({ where: whereClause })
@@ -105,9 +87,11 @@ router.get('/list', authenticateToken, requireRole('ADMIN'), async (req, res) =>
                     generatedBy: code.generatedByUser?.admin
                         ? `${code.generatedByUser.admin.prenom} ${code.generatedByUser.admin.nom} (${code.generatedByUser.email})`
                         : 'Système',
+
                     usedBy: code.usedByUser?.etudiant
                         ? `${code.usedByUser.etudiant.prenom} ${code.usedByUser.etudiant.nom} (${code.usedByUser.email})`
                         : null
+
 
                 })),
                 pagination: {
