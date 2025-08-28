@@ -6,7 +6,7 @@ const router = express.Router();
 
 /**
  * GET /activity
- * Récupère les activités récentes pour le dashboard
+ * Récupère les activités récentes pour le dashboard 
  */
 router.get('/', authenticateToken, async (req, res) => {
     try {
