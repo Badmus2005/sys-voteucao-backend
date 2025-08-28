@@ -1,5 +1,6 @@
 import express from 'express';
 import { ACADEMIC } from '../shared/academicData.js';
+import { authenticateToken } from '../middlewares/auth.js';
 
 const router = express.Router();
 
