@@ -65,6 +65,7 @@ router.get('/profile', authenticateToken, async (req, res) => {
       email: etudiant.user.email,
       role: etudiant.user.role,
       matricule: etudiant.matricule,
+      codeInscription: etudiant.codeInscription,
       nom: etudiant.nom,
       prenom: etudiant.prenom,
       filiere: etudiant.filiere,
