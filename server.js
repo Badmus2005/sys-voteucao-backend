@@ -22,7 +22,7 @@ import userRegisterRouter from './routes/userRegister.js';
 import matriculesRouter from './routes/matricules.js';
 import codesRouter from './routes/codes.js';
 import statsRouter from './routes/stats.js';
-import configAcademicRoutes from './routes/configAcademicRoutes.js';
+
 
 
 
@@ -86,7 +86,7 @@ app.use('/api/matricules', matriculesRouter);
 app.use('/api/codes', codesRouter);
 app.use('/api/stats', statsRouter);
 app.use('/api/activity', activityRouter);
-app.use('/api/configAcademic', configAcademicRoutes);
+
 
 // Route de test
 app.get('/api/test', (_req, res) => {
