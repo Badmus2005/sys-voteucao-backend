@@ -1,4 +1,7 @@
 import { PasswordResetService } from '../services/passwordResetService.js';
+import { validateEtudiantData } from '../shared/academicHelpers.js';
+//import { ACADEMIC } from '../shared/academicData.js';
+
 import prisma from '../prisma.js';
 
 export const resetStudentAccess = async (req, res) => {
@@ -98,20 +101,53 @@ export const getStudentByCodeInscription = async (req, res) => {
     }
 };
 
-// Liste avec pagination + recherche
+// Liste avec pagination + recherche + filtres dynamiques
 export const getAllStudents = async (req, res) => {
     console.log('Requête reçue pour /students');
     try {
-        const { page = 1, limit = 10, search = '' } = req.query;
+        const {
+            page = 1,
+            limit = 10,
+            search = '',
+            filiere,
+            annee,
+            ecole,
+            statut
+        } = req.query;
 
-        // Version simplifiée sans filtres complexes
+        // Validation des filtres
+        const errors = validateEtudiantData({ filiere, annee, ecole });
+        if (errors.length) {
+            return res.status(400).json({
+                success: false,
+                message: 'Filtres invalides',
+                errors
+            });
+        }
+
+        // Construction du filtre Prisma
+        const whereClause = {
+            ...(search && {
+                OR: [
+                    { nom: { contains: search, mode: 'insensitive' } },
+                    { prenom: { contains: search, mode: 'insensitive' } },
+                    { matricule: { contains: search, mode: 'insensitive' } }
+                ]
+            }),
+            ...(filiere && { filiere }),
+            ...(ecole && { ecole }),
+            ...(annee && { annee: Number(annee) }),
+            ...(statut && { statut })
+        };
+
         const students = await prisma.etudiant.findMany({
+            where: whereClause,
             skip: (parseInt(page) - 1) * parseInt(limit),
             take: parseInt(limit),
             orderBy: { nom: 'asc' }
         });
 
-        const total = await prisma.etudiant.count();
+        const total = await prisma.etudiant.count({ where: whereClause });
 
         return res.json({
             success: true,
@@ -130,7 +166,9 @@ export const getAllStudents = async (req, res) => {
         console.error('Erreur:', error);
         return res.status(500).json({
             success: false,
-            message: 'Erreur serveur'
+            message: 'Erreur serveur',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
         });
     }
 };
+
