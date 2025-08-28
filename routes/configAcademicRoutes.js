@@ -4,7 +4,7 @@ import { authenticateToken } from '../middlewares/auth.js';
 
 const router = express.Router();
 
-router.get('/config-academic', authenticateToken, (req, res) => {
+router.get('/', authenticateToken, (req, res) => {
     try {
         const filieres = Object.values(ACADEMIC.ECOLES).flat();
         const ecoles = Object.keys(ACADEMIC.ECOLES);
