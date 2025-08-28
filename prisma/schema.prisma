@@ -1,10 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -14,8 +7,24 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum DelegueType {
+  PREMIER
+  DEUXIEME
+}
+
+enum Role {
+  ETUDIANT
+  ADMIN
+}
+
+enum ElectionType {
+  SALLE
+  ECOLE
+  UNIVERSITE
+}
+
 model User {
-  id                   String   @id @default(cuid()) 
+  id                   String   @id @default(cuid())
   email                String   @unique
   password             String
   role                 Role     @default(ADMIN)
@@ -28,28 +37,25 @@ model User {
   admin                Admin?    @relation("UserToAdmin")
   votes                Vote[]
   candidates           Candidate[]
-
-  generatedCodes       RegistrationCode[] @relation("GeneratedCodes") 
-  usedRegistrationCode RegistrationCode?  @relation("UsedCodes")       
-
+  generatedCodes       RegistrationCode[] @relation("GeneratedCodes")
+  usedRegistrationCode RegistrationCode?  @relation("UsedCodes")
   voteTokens           VoteToken[]
   activityLogs         ActivityLog[] @relation("UserActivityLogs")
   notifications        Notification[]
 }
 
-
 model Etudiant {
   id              Int     @id @default(autoincrement())
-  userId          Int?    @unique
+  userId          String? @unique
   matricule       String? @unique
   codeInscription String? @unique
-  identifiantTemporaire String? @unique    // Identifiant temporaire pour réinitialisatio
+  identifiantTemporaire String? @unique
   nom             String?
   prenom          String?
   filiere         String?
   annee           Int?
   photoUrl        String?
-  ecole           String? 
+  ecole           String?
   user            User?   @relation("UserToEtudiant", fields: [userId], references: [id])
   responsableSalle ResponsableSalle[]
 }
@@ -62,13 +68,13 @@ model Election {
   dateDebut   DateTime
   dateFin     DateTime
   createdAt   DateTime    @default(now())
-  filiere     String?     // Filière concernée (pour niveau 1)
-  annee       Int?        // Année concernée (pour niveau 1)
-  ecole       String?     // École concernée (pour niveau 2)
-  niveau      Int         // Rendu obligatoire : 1, 2 ou 3
-  delegueType DelegueType? // PREMIER ou DEUXIEME (pour niveau 2)
+  filiere     String?
+  annee       Int?
+  ecole       String?
+  niveau      Int
+  delegueType DelegueType?
   isActive    Boolean     @default(true)
-  
+
   candidates  Candidate[]
   votes       Vote[]
   voteTokens  VoteToken[]
@@ -80,8 +86,9 @@ model Candidate {
   prenom     String
   program    String?
   photoUrl   String?
-  userId     Int
+  userId     String
   electionId Int
+
   election   Election  @relation(fields: [electionId], references: [id])
   user       User      @relation(fields: [userId], references: [id])
   votes      Vote[]
@@ -89,11 +96,11 @@ model Candidate {
 
 model Vote {
   id          Int       @id @default(autoincrement())
-  userId      Int
+  userId      String
   electionId  Int
   candidateId Int
   createdAt   DateTime  @default(now())
-  poidsVote   Float     // Champ obligatoire et unique source de vérité
+  poidsVote   Float
 
   user        User      @relation(fields: [userId], references: [id])
   election    Election  @relation(fields: [electionId], references: [id])
@@ -113,7 +120,7 @@ model ResponsableSalle {
   etudiant   Etudiant @relation(fields: [etudiantId], references: [id])
   delegueEcole DelegueEcole[]
 
-  @@unique([etudiantId, annee]) // Contrainte ajoutée
+  @@unique([etudiantId, annee])
 }
 
 model DelegueEcole {
@@ -126,7 +133,7 @@ model DelegueEcole {
   responsable     ResponsableSalle @relation(fields: [responsableId], references: [id])
   delegueUniversitaire DelegueUniversite[]
 
-  @@unique([responsableId, typeDelegue, ecole]) // Contrainte ajoutée
+  @@unique([responsableId, typeDelegue, ecole])
 }
 
 model DelegueUniversite {
@@ -140,7 +147,7 @@ model DelegueUniversite {
 
 model Admin {
   id      Int    @id @default(autoincrement())
-  userId  Int    @unique
+  userId  String @unique
   nom     String
   prenom  String
   poste   String
@@ -157,8 +164,8 @@ model RegistrationCode {
   used        Boolean  @default(false)
   usedAt      DateTime?
 
-  generatedBy String   
-  usedBy      String?  
+  generatedBy String
+  usedBy      String? @unique
 
   generatedByUser User @relation("GeneratedCodes", fields: [generatedBy], references: [id], onDelete: Cascade)
   usedByUser      User? @relation("UsedCodes", fields: [usedBy], references: [id], onDelete: Cascade)
@@ -166,11 +173,10 @@ model RegistrationCode {
   @@map("registration_codes")
 }
 
-
 model VoteToken {
   id          Int       @id @default(autoincrement())
   token       String    @unique
-  userId      Int
+  userId      String
   electionId  Int
   isUsed      Boolean   @default(false)
   createdAt   DateTime  @default(now())
@@ -187,27 +193,25 @@ model ActivityLog {
   id        Int      @id @default(autoincrement())
   action    String
   details   String?
-  userId    Int?
+  userId    String?
   createdAt DateTime @default(now())
 
   user      User?    @relation("UserActivityLogs", fields: [userId], references: [id])
 }
 
-
 model Notification {
   id        String   @id @default(cuid())
   title     String
   message   String
-  type      String   // info, warning, success, error, system
-  priority  String   // low, medium, high, urgent
+  type      String
+  priority  String
   read      Boolean  @default(false)
-  relatedEntity String? // election, candidate, vote, user, system
+  relatedEntity String?
   entityId  String?
-  
-  // Relations
-  userId    Int
+
+  userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -215,21 +219,4 @@ model Notification {
   @@index([read])
   @@index([createdAt])
   @@index([userId, read])
-}
-
-enum DelegueType {
-  PREMIER
-  DEUXIEME
-}
-
-
-enum Role {
-  ETUDIANT
-  ADMIN
-}
-
-enum ElectionType {
-  SALLE
-  ECOLE
-  UNIVERSITE
 }
