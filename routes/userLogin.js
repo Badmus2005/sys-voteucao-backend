@@ -138,7 +138,7 @@ const handleTemporaryLogin = async (req, res) => {
         const student = await PasswordResetService.validateTemporaryCredentials(identifiantTemporaire, password);
 
         // Generate short-lived token
-        const token = jwt.sign(
+        const tokenTemporary = jwt.sign(
             {
                 id: student.user.id,
                 email: student.user.email,
@@ -153,7 +153,7 @@ const handleTemporaryLogin = async (req, res) => {
             success: true,
             message: 'Connexion temporaire réussie - Changement de mot de passe requis',
             data: {
-                token,
+                tokenTemporary,
                 requirePasswordChange: true,
                 user: {
                     id: student.user.id,
