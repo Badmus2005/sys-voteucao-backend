@@ -155,10 +155,13 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
           await tx.registrationCode.update({
             where: { code },
             data: {
-              isUsed: true,
-              usedById: user.id
+              used: true,
+              usedByUser: {
+                connect: { id: user.id }
+              }
             }
           });
+
 
           return user;
         });
