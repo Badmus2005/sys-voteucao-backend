@@ -54,6 +54,7 @@ const rateLimit = (options) => {
 };
 
 router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, res) => {
+  console.log("Requête reçue:", req.body);
   try {
     const { email, password, confirmPassword, nom, prenom, filiere, annee, code, matricule, ecole } = req.body;
 
@@ -102,14 +103,29 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
     // 1ère année : code d'inscription
     if (anneeInt === 1) {
       if (!code) {
-        return res.status(400).json({ success: false, message: "Code d'inscription requis pour la 1ère année." });
-      }
-      const regCode = await prisma.registrationCode.findUnique({ where: { code } });
-      if (!regCode || regCode.isUsed) {
-        return res.status(400).json({ success: false, message: "Code d'inscription invalide ou déjà utilisé." });
+        return res.status(400).json({
+          success: false,
+          message: "Code d'inscription requis pour la 1ère année."
+        });
       }
 
       try {
+        const regCode = await prisma.registrationCode.findUnique({ where: { code } });
+
+        if (!regCode) {
+          return res.status(404).json({
+            success: false,
+            message: "Ce code d'inscription n'existe pas."
+          });
+        }
+
+        if (regCode.isUsed) {
+          return res.status(409).json({
+            success: false,
+            message: "Ce code d'inscription a déjà été utilisé."
+          });
+        }
+
         const temporaryIdentifiant = generateTemporaryIdentifiant();
 
         const createdUser = await prisma.$transaction(async (tx) => {
@@ -128,7 +144,7 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
                   filiere,
                   annee: anneeInt,
                   codeInscription: code,
-                  matricule: null,
+                  matricule: undefined, // évite les conflits @unique
                   ecole
                 }
               }
@@ -138,13 +154,20 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
 
           await tx.registrationCode.update({
             where: { code },
-            data: { isUsed: true, usedById: user.id }
+            data: {
+              isUsed: true,
+              usedById: user.id
+            }
           });
 
           return user;
         });
 
-        logger.info('Inscription 1ère année OK', { userId: createdUser.id, email });
+        logger.info('Inscription 1ère année OK', {
+          userId: createdUser.id,
+          email,
+          code
+        });
 
         return res.status(201).json({
           success: true,
@@ -161,11 +184,22 @@ router.post('/', rateLimit({ windowMs: 15 * 60 * 1000, max: 5 }), async (req, re
             }
           }
         });
+
       } catch (txError) {
-        logger.error('Erreur transaction 1A', txError);
-        return res.status(500).json({ success: false, message: "Erreur lors de l'inscription." });
+        logger.error('Erreur transaction 1A', {
+          message: txError.message,
+          code: txError.code,
+          stack: txError.stack
+        });
+
+        return res.status(500).json({
+          success: false,
+          message: "Erreur interne lors de l'inscription.",
+          error: txError.message
+        });
       }
     }
+
 
     // 2e/3e année : via matricule
     if (anneeInt >= 2 && anneeInt <= 3) {
