@@ -198,7 +198,7 @@ router.get(
 // GET /api/students
 // Récupérer tous les étudiants avec pagination et filtres
 // ============================
-router.get('/', authenticateToken, requireAdmin, async (req, res) => {
+router.get('/', async (req, res) => {
     try {
         const { page = 1, limit = 10, filiere, annee, ecole, status, search } = req.query;
         const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -264,7 +264,7 @@ router.get('/', authenticateToken, requireAdmin, async (req, res) => {
 // GET /api/students/stats
 // Statistiques globales
 // ============================
-router.get('/stats', authenticateToken, requireAdmin, async (req, res) => {
+router.get('/stats', async (req, res) => {
     try {
         const { filiere, annee, ecole } = req.query;
         const where = { user: { role: 'ETUDIANT' } };
