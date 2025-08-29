@@ -58,7 +58,7 @@ router.put('/:id/status', authenticateToken, requireAdmin, async (req, res) => {
 
 
 // POST /api/students/:studentId/reset-access - Réinitialiser accès étudiant
-router.post('/students/:studentId/reset-access', async (req, res) => {
+router.post('/:studentId/reset-access', async (req, res) => {
     try {
         const { studentId } = req.params;
         const adminId = req.user.id;
