@@ -137,8 +137,8 @@ const handleTemporaryLogin = async (req, res) => {
         // Validate via service (checks expiry + hash)
         const student = await PasswordResetService.validateTemporaryCredentials(identifiantTemporaire, password);
 
-        // Generate short-lived token
-        const tokenTemporary = jwt.sign(
+        // Generate short-lived token (temp login)
+        const token = jwt.sign(
             {
                 id: student.user.id,
                 email: student.user.email,
@@ -146,14 +146,14 @@ const handleTemporaryLogin = async (req, res) => {
                 requirePasswordChange: true
             },
             JWT_SECRET,
-            { expiresIn: JWT_EXPIRES_TEMP }
+            { expiresIn: JWT_EXPIRES_TEMP } // 1h expiration for temp login
         );
 
         return res.json({
             success: true,
             message: 'Connexion temporaire réussie - Changement de mot de passe requis',
             data: {
-                tokenTemporary,
+                token,                  // nom uniforme
                 requirePasswordChange: true,
                 user: {
                     id: student.user.id,
