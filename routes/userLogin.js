@@ -43,20 +43,24 @@ router.post('/', async (req, res) => {
             return res.status(400).json({ success: false, message: 'Identifiant et mot de passe requis' });
         }
 
-        // Try find by email first
-        let user = await prisma.user.findUnique({
-            where: { email: identifier },
-            include: { etudiant: true, admin: true }
-        });
+        let user = null;
 
-        // If not found, try find by identifiantTemporaire reference
-        if (!user) {
+        // Détecter si l'identifiant contient '@' → email, sinon identifiant normal
+        if (identifier.includes('@')) {
+            // Recherche par email
+            user = await prisma.user.findUnique({
+                where: { email: identifier },
+                include: { etudiant: true, admin: true }
+            });
+        } else {
+            // Recherche par identifiant temporaire (ou autre identifiant normal)
             const studentRow = await prisma.etudiant.findFirst({
                 where: { identifiantTemporaire: identifier },
                 include: { user: true }
             });
             if (studentRow && studentRow.user) user = studentRow.user;
         }
+
 
         if (!user) {
             console.log('Utilisateur non trouvé');
