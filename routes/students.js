@@ -3,6 +3,7 @@ import prisma from '../prisma.js';
 import { authenticateToken, requireAdmin } from '../middlewares/auth.js';
 import { PasswordResetService } from '../services/passwordResetService.js';
 
+
 const router = express.Router();
 
 // PUT /api/students/:id/status - Modifier le statut d'un étudiant
@@ -54,42 +55,6 @@ router.put('/:id/status', authenticateToken, requireAdmin, async (req, res) => {
         });
     }
 });
-
-
-
-// 📌 Route : récupérer tous les étudiants
-router.get('/', authenticateToken, requireAdmin, async (req, res) => {
-    try {
-        const students = await prisma.etudiant.findMany();
-
-        res.json(students.map(student => ({
-            id: student.id,
-            matricule: student.matricule,
-            nom: student.nom,
-            prenom: student.prenom,
-            ecole: student.ecole,
-            annee: student.annee
-        })));
-    } catch (error) {
-        console.error("Erreur lors de la récupération des étudiants:", error);
-        res.status(500).json({ error: "Erreur serveur lors de la récupération des étudiants" });
-    }
-});
-
-// 📌 Route : récupérer les statistiques des étudiants
-router.get('/stats', authenticateToken, requireAdmin, async (req, res) => {
-    try {
-        const totalStudents = await prisma.etudiant.count();
-
-        res.json({
-            totalStudents
-        });
-    } catch (error) {
-        console.error("Erreur lors de la récupération des statistiques:", error);
-        res.status(500).json({ error: "Erreur serveur lors de la récupération des statistiques" });
-    }
-});
-
 
 
 // POST /api/students/:studentId/reset-access - Réinitialiser accès étudiant
@@ -226,5 +191,107 @@ router.get(
         }
     }
 );
+
+
+
+// ============================
+// GET /api/students
+// Récupérer tous les étudiants avec pagination et filtres
+// ============================
+router.get('/', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const { page = 1, limit = 10, filiere, annee, ecole, status, search } = req.query;
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+
+        // Filtres de base
+        const where = { user: { role: 'ETUDIANT' } };
+
+        if (status === 'active') where.user.actif = true;
+        if (status === 'inactive') where.user.actif = false;
+        if (filiere) where.filiere = filiere;
+        if (annee) where.annee = parseInt(annee);
+        if (ecole) where.ecole = ecole;
+        if (search) {
+            where.OR = [
+                { nom: { contains: search, mode: 'insensitive' } },
+                { prenom: { contains: search, mode: 'insensitive' } },
+                { identifiantTemporaire: { contains: search, mode: 'insensitive' } },
+                { matricule: { contains: search, mode: 'insensitive' } }
+            ];
+        }
+
+        const [students, total] = await Promise.all([
+            prisma.etudiant.findMany({
+                where,
+                include: { user: { select: { email: true, actif: true } } },
+                skip,
+                take: parseInt(limit),
+                orderBy: [{ nom: 'asc' }, { prenom: 'asc' }]
+            }),
+            prisma.etudiant.count({ where })
+        ]);
+
+        const formattedStudents = students.map(s => ({
+            id: s.id,
+            nom: s.nom,
+            prenom: s.prenom,
+            identifiantTemporaire: s.identifiantTemporaire,
+            email: s.user?.email,
+            filiere: s.filiere,
+            annee: s.annee,
+            status: s.user?.actif ? 'Actif' : 'Inactif',
+            matricule: s.matricule,
+            ecole: s.ecole
+        }));
+
+        res.json({
+            success: true,
+            data: formattedStudents,
+            pagination: {
+                page: parseInt(page),
+                limit: parseInt(limit),
+                total,
+                pages: Math.ceil(total / parseInt(limit))
+            }
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
+// ============================
+// GET /api/students/stats
+// Statistiques globales
+// ============================
+router.get('/stats', authenticateToken, requireAdmin, async (req, res) => {
+    try {
+        const { filiere, annee, ecole } = req.query;
+        const where = { user: { role: 'ETUDIANT' } };
+
+        if (filiere) where.filiere = filiere;
+        if (annee) where.annee = parseInt(annee);
+        if (ecole) where.ecole = ecole;
+
+        const students = await prisma.etudiant.findMany({
+            where,
+            select: { id: true, user: { select: { actif: true } }, filiere: true, annee: true, ecole: true }
+        });
+
+        const totalStudents = students.length;
+        const activeStudents = students.filter(s => s.user.actif).length;
+        const inactiveStudents = totalStudents - activeStudents;
+        const activationRate = totalStudents ? ((activeStudents / totalStudents) * 100).toFixed(2) : '0.00';
+
+        res.json({
+            success: true,
+            statistics: { totalStudents, activeStudents, inactiveStudents, activationRate }
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Erreur serveur' });
+    }
+});
+
 
 export default router;
