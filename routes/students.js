@@ -58,42 +58,41 @@ router.put('/:id/status', authenticateToken, requireAdmin, async (req, res) => {
 
 
 // POST /api/students/:studentId/reset-access - Réinitialiser accès étudiant
-router.post('/:studentId/reset-accesss',
-    async (req, res) => {
-        try {
-            const { studentId } = req.params;
-            const adminId = req.user.id;
+router.post('/students/:studentId/reset-access', async (req, res) => {
+    try {
+        const { studentId } = req.params;
+        const adminId = req.user.id;
 
-            const temporaryCredentials = await PasswordResetService.resetStudentAccess(
-                adminId,
-                parseInt(studentId)
-            );
+        const temporaryCredentials = await PasswordResetService.resetStudentAccess(
+            adminId,
+            studentId
+        );
 
-            return res.json({
-                success: true,
-                message: 'Accès réinitialisés avec succès',
-                data: {
-                    temporaryIdentifiant: temporaryCredentials.temporaryIdentifiant,
-                    temporaryPassword: temporaryCredentials.temporaryPassword,
-                    requirePasswordChange: true,
-                    student: {
-                        id: parseInt(studentId),
-                        nom: temporaryCredentials.student.nom,
-                        prenom: temporaryCredentials.student.prenom,
-                        matricule: temporaryCredentials.student.matricule
-                    }
+        return res.json({
+            success: true,
+            message: 'Accès réinitialisés avec succès',
+            data: {
+                temporaryIdentifiant: temporaryCredentials.temporaryIdentifiant,
+                temporaryPassword: temporaryCredentials.temporaryPassword,
+                requirePasswordChange: true,
+                student: {
+                    id: studentId,
+                    nom: temporaryCredentials.student.nom,
+                    prenom: temporaryCredentials.student.prenom,
+                    matricule: temporaryCredentials.student.matricule
                 }
-            });
-        } catch (error) {
-            console.error('Erreur réinitialisation accès:', error);
-            return res.status(500).json({
-                success: false,
-                message: 'Erreur lors de la réinitialisation des accès',
-                error: process.env.NODE_ENV === 'development' ? error.message : undefined
-            });
-        }
+            }
+        });
+    } catch (error) {
+        console.error('Erreur réinitialisation accès:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Erreur lors de la réinitialisation des accès',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
     }
-);
+});
+
 
 // Recherche étudiant par matricule
 router.get(
