@@ -10,34 +10,50 @@ const router = express.Router();
  */
 router.get('/', authenticateToken, async (req, res) => {
     try {
-        const { limit = 5 } = req.query;
+        const { limit = 10 } = req.query;
 
+        // Récupérer les activités avec les informations utilisateur de base
         const activities = await prisma.activityLog.findMany({
             take: parseInt(limit),
             orderBy: { createdAt: 'desc' },
             include: {
                 user: {
                     select: {
+                        id: true,
                         email: true,
-                        admin: { select: { nom: true, prenom: true } },
-                        etudiant: { select: { nom: true, prenom: true } }
+                        role: true,
+                        admin: {
+                            select: {
+                                nom: true,
+                                prenom: true
+                            }
+                        },
+                        etudiant: {
+                            select: {
+                                nom: true,
+                                prenom: true
+                            }
+                        }
                     }
                 }
             }
         });
 
+        // Formatter les activités
         const formattedActivities = activities.map(activity => {
-            const user = activity.user;
-            const name = user.admin
-                ? `${user.admin.nom} ${user.admin.prenom}`
-                : user.etudiant
-                    ? `${user.etudiant.nom} ${user.etudiant.prenom}`
-                    : user.email;
+            let userName = activity.user?.email || 'Utilisateur inconnu';
+
+            // Déterminer le nom selon le rôle
+            if (activity.user?.role === 'ADMIN' && activity.user.admin) {
+                userName = `${activity.user.admin.nom} ${activity.user.admin.prenom}`;
+            } else if (activity.user?.role === 'ETUDIANT' && activity.user.etudiant) {
+                userName = `${activity.user.etudiant.nom} ${activity.user.etudiant.prenom}`;
+            }
 
             return {
                 id: activity.id,
                 title: activity.action,
-                content: `${name} - ${activity.details}`,
+                content: `${userName} - ${activity.details || 'Action effectuée'}`,
                 time: formatTime(activity.createdAt),
                 timestamp: activity.createdAt,
                 icon: getIconForAction(activity.actionType)
@@ -46,8 +62,13 @@ router.get('/', authenticateToken, async (req, res) => {
 
         res.json(formattedActivities);
     } catch (err) {
-        console.error("Erreur activity:", err);
-        res.status(500).json({ message: "Erreur serveur" });
+        console.error("Erreur activity endpoint:", err);
+        res.status(500).json({
+            message: "Erreur serveur",
+            error: err.message,
+            // Ne pas envoyer les détails complets en production
+            ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+        });
     }
 });
 
