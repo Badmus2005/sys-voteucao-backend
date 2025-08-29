@@ -57,15 +57,20 @@ router.put('/:id/status', authenticateToken, requireAdmin, async (req, res) => {
 });
 
 
+
+
 // POST /api/students/:studentId/reset-access - Réinitialiser accès étudiant
 router.post('/:studentId/reset-access', async (req, res) => {
     try {
         const { studentId } = req.params;
-        const adminId = req.user.id;
+
+        // ⚠️ Pour l’instant tu n’as pas req.user (si tu n’as pas encore le système JWT), 
+        // donc on met un faux adminId ou null
+        const adminId = req.user?.id || null;
 
         const temporaryCredentials = await PasswordResetService.resetStudentAccess(
             adminId,
-            studentId
+            parseInt(studentId) // <= important : ton id d'étudiant est Int en Prisma
         );
 
         return res.json({
@@ -74,6 +79,7 @@ router.post('/:studentId/reset-access', async (req, res) => {
             data: {
                 temporaryIdentifiant: temporaryCredentials.temporaryIdentifiant,
                 temporaryPassword: temporaryCredentials.temporaryPassword,
+                expirationDate: temporaryCredentials.expirationDate,
                 requirePasswordChange: true,
                 student: {
                     id: studentId,
@@ -92,6 +98,7 @@ router.post('/:studentId/reset-access', async (req, res) => {
         });
     }
 });
+
 
 
 // Recherche étudiant par matricule
