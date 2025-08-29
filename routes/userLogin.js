@@ -69,15 +69,19 @@ router.post('/', async (req, res) => {
 
         console.log('Utilisateur trouvé:', user.email || user.id);
 
-        // If temporary password exists -> require using it (priority to temp)
+        // Check if temporary password exists
         if (user.tempPassword) {
-            // Inform frontend that temporary credentials are required
-            console.log('temporary password exists - block normal login');
-            return res.status(401).json({
-                success: false,
-                message: 'Votre compte a été réinitialisé. Utilisez vos identifiants temporaires.',
-                requirePasswordChange: true
-            });
+            if (identifiantTemporaire) {
+                // L'utilisateur tente de se connecter avec le mot de passe temporaire
+                return handleTemporaryLogin(req, res);
+            } else {
+                // Connexion normale non autorisée tant que compte temp existe
+                return res.status(401).json({
+                    success: false,
+                    message: 'Votre compte a été réinitialisé. Utilisez vos identifiants temporaires.',
+                    requirePasswordChange: true
+                });
+            }
         }
 
         // Normal password flow
