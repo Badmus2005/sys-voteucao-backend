@@ -39,6 +39,7 @@ router.get('/', authenticateToken, async (req, res) => {
                 title: activity.action,
                 content: `${name} - ${activity.details}`,
                 time: formatTime(activity.createdAt),
+                timestamp: activity.createdAt,
                 icon: getIconForAction(activity.actionType)
             };
         });

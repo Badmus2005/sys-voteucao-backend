@@ -196,6 +196,7 @@ model ActivityLog {
   action    String
   details   String?
   userId    String?
+  actionType String @default("INFO")
   createdAt DateTime @default(now())
 
   user      User?    @relation("UserActivityLogs", fields: [userId], references: [id])
