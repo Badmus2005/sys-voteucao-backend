@@ -276,7 +276,7 @@ router.post('/', authenticateToken, async (req, res) => {
                 filiere,
                 annee: annee ? parseInt(annee) : null,
                 ecole,
-                niveau: parseInt(niveau),
+                niveau: niveau ? niveau : null,
                 delegueType: delegueTypePrisma
             }
         });
