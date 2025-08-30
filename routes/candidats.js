@@ -146,6 +146,73 @@ router.get('/election/:electionId', authenticateToken, async (req, res) => {
     }
 });
 
+// Vérifier si l'utilisateur est déjà candidat à une élection (avec détails)
+router.get('/is-candidate/:electionId', authenticateToken, async (req, res) => {
+    try {
+        const { electionId } = req.params;
+
+        // Vérifier que l'élection existe
+        const election = await prisma.election.findUnique({
+            where: { id: parseInt(electionId) }
+        });
+
+        if (!election) {
+            return res.status(404).json({
+                message: 'Élection non trouvée',
+                isCandidate: false
+            });
+        }
+
+        // Vérifier si l'utilisateur est déjà candidat pour cette élection
+        const existingCandidate = await prisma.candidate.findFirst({
+            where: {
+                userId: req.user.id,
+                electionId: parseInt(electionId)
+            },
+            include: {
+                election: {
+                    select: {
+                        titre: true,
+                        type: true
+                    }
+                }
+            }
+        });
+
+        if (existingCandidate) {
+            res.json({
+                isCandidate: true,
+                candidate: {
+                    id: existingCandidate.id,
+                    nom: existingCandidate.nom,
+                    prenom: existingCandidate.prenom,
+                    program: existingCandidate.program,
+                    photoUrl: existingCandidate.photoUrl,
+                    createdAt: existingCandidate.createdAt
+                },
+                election: {
+                    id: existingCandidate.election.id,
+                    titre: existingCandidate.election.titre,
+                    type: existingCandidate.election.type
+                }
+            });
+        } else {
+            res.json({
+                isCandidate: false,
+                message: 'Vous n\'êtes pas candidat à cette élection'
+            });
+        }
+
+    } catch (error) {
+        console.error('Erreur vérification candidature:', error);
+        res.status(500).json({
+            message: 'Erreur serveur',
+            isCandidate: false
+        });
+    }
+});
+
+
 // GET /api/candidats/:id - Récupérer un candidat spécifique
 router.get('/:id', async (req, res) => {
     try {
