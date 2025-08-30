@@ -34,7 +34,7 @@ router.get('/', async (req, res) => {
     }
 });
 
-// Récupérer les élections par type et niveau (AVEC PAGINATION)
+// Récupérer les élections par type et niveau 
 router.get('/by-type/:type', async (req, res) => {
     try {
         const { type } = req.params;
