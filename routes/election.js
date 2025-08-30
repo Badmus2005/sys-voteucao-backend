@@ -5,15 +5,29 @@ import VoteToken from '../models/VoteToken.js';
 
 const router = express.Router();
 
-// Récupérer toutes les élections actives
+// Récupérer toutes les élections (pas seulement les actives)
 router.get('/', async (req, res) => {
     try {
+        const { status } = req.query;
+
+        let whereClause = {};
+
+        if (status === 'active') {
+            whereClause.isActive = true;
+            whereClause.dateDebut = { lte: new Date() };
+            whereClause.dateFin = { gte: new Date() };
+        } else if (status === 'upcoming') {
+            whereClause.isActive = true;
+            whereClause.dateDebut = { gt: new Date() };
+        } else if (status === 'closed') {
+            whereClause.OR = [
+                { isActive: false },
+                { dateFin: { lt: new Date() } }
+            ];
+        }
+
         const elections = await prisma.election.findMany({
-            where: {
-                isActive: true,
-                dateDebut: { lte: new Date() },
-                dateFin: { gte: new Date() }
-            },
+            where: whereClause,
             include: {
                 candidates: {
                     include: {
