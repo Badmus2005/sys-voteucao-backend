@@ -1,72 +1,83 @@
-import express from 'express';
-import multer from 'multer';  // ⬅️ multer fournit memoryStorage()
+
 import axios from 'axios';
 import FormData from 'form-data';
+import express from 'express';
+import multer from 'multer';
+import fs from 'fs';
 import prisma from '../prisma.js';
 import { authenticateToken } from '../middlewares/auth.js';
 
-const router = express.Router();
 
+const router = express.Router();
+// Configuration ImgBB
 const IMGBB_UPLOAD_URL = 'https://api.imgbb.com/1/upload';
 
-// ✅ CONFIGURATION CORRECTE avec memoryStorage
 const upload = multer({
-  storage: multer.memoryStorage(),  // ⬅️ Utilisation correcte
-  limits: {
-    fileSize: 2 * 1024 * 1024,
-    files: 1
-  },
+  dest: '/tmp/uploads',  // Utilisez /tmp pour le stockage temporaire (éphémère sur Railways)
+  limits: { fileSize: 2 * 1024 * 1024 }, // 2MB
   fileFilter: (req, file, cb) => {
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/jpg'];
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/gif'];
     if (allowedTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error('Type de fichier non supporté. Utilisez JPEG ou PNG.'));
+      cb(new Error('Type de fichier non supporté (JPEG, PNG, GIF uniquement)'));
     }
   }
 });
 
-// Dans votre route backend
 router.post('/image', authenticateToken, upload.single('image'), async (req, res) => {
   try {
     if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        message: 'Aucun fichier image fourni'
-      });
+      return res.status(400).json({ message: 'Aucun fichier téléchargé' });
     }
 
-    // Renommer le fichier côté backend
-    const timestamp = Date.now();
-    const safeFileName = `candidate_${req.user.id}_${timestamp}.webp`;
+    // Créer un FormData pour ImgBB
+    const formData = new FormData();
+    formData.append('image', fs.createReadStream(req.file.path));
 
-    // Traitement image avec Sharp
-    const processedImage = await sharp(req.file.buffer)
-      .resize(800, 800, { fit: 'inside' })
-      .webp({ quality: 80 })
-      .toBuffer();
+    // Envoyer à ImgBB
+    const response = await axios.post(
+      `${IMGBB_UPLOAD_URL}?key=${process.env.IMGBB_API_KEY}`,
+      formData,
+      {
+        headers: formData.getHeaders(),
+        timeout: 10000
+      }
+    );
 
-    // ⚠️ SOLUTION TEMPORAIRE - Contournement ImgBB
-    const fakeUrl = `https://via.placeholder.com/300x300?text=${encodeURIComponent(safeFileName)}`;
+    // Supprimer le fichier temporaire après upload
+    fs.unlinkSync(req.file.path);
 
-    // Simuler un délai
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    if (!response.data.success) {
+      throw new Error('Échec de l\'upload vers ImgBB');
+    }
+
+    // Mettre à jour l'URL dans la base de données
+    const imgbbUrl = response.data.data.url;
+    await prisma.candidate.update({
+      where: { userId: req.user.id },
+      data: { photoUrl: imgbbUrl }
+    });
 
     res.json({
       success: true,
-      url: fakeUrl,
-      message: 'Image uploadée avec succès',
-      fileName: safeFileName
+      photoUrl: imgbbUrl,
+      url: imgbbUrl,
+      message: 'Avatar mis à jour avec succès'
     });
 
   } catch (error) {
-    console.error('Erreur upload:', error);
-    res.status(400).json({
-      success: false,
-      message: 'Format d\'image invalide',
-      details: 'Le nom ou le format du fichier est incorrect'
+    console.error('Erreur upload avatar:', error);
+    // Nettoyage du fichier temporaire en cas d'erreur
+    if (req.file?.path && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    res.status(500).json({
+      message: error.response?.data?.error?.message || 'Erreur lors de l\'upload'
     });
   }
 });
+
+
 
 export default router;

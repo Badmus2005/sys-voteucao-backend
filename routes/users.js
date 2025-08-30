@@ -129,6 +129,7 @@ router.put('/profile', authenticateToken, async (req, res) => {
   }
 });
 
+// Changement de photo de profil
 router.post('/avatar', authenticateToken, upload.single('avatar'), async (req, res) => {
   try {
     if (!req.file) {
@@ -166,7 +167,6 @@ router.post('/avatar', authenticateToken, upload.single('avatar'), async (req, r
     res.json({
       success: true,
       photoUrl: imgbbUrl,
-      url: imgbbUrl,
       message: 'Avatar mis à jour avec succès'
     });
 
