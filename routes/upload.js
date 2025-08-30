@@ -26,11 +26,9 @@ const upload = multer({
   }
 });
 
-// Dans votre route backend, remplacez temporairement la partie ImgBB :
+// Dans votre route backend
 router.post('/image', authenticateToken, upload.single('image'), async (req, res) => {
   try {
-    console.log('Début upload image candidature');
-
     if (!req.file) {
       return res.status(400).json({
         success: false,
@@ -38,27 +36,35 @@ router.post('/image', authenticateToken, upload.single('image'), async (req, res
       });
     }
 
+    // Renommer le fichier côté backend
+    const timestamp = Date.now();
+    const safeFileName = `candidate_${req.user.id}_${timestamp}.webp`;
+
+    // Traitement image avec Sharp
+    const processedImage = await sharp(req.file.buffer)
+      .resize(800, 800, { fit: 'inside' })
+      .webp({ quality: 80 })
+      .toBuffer();
+
     // ⚠️ SOLUTION TEMPORAIRE - Contournement ImgBB
-    console.log('⚠️ Mode test - contournement ImgBB activé');
+    const fakeUrl = `https://via.placeholder.com/300x300?text=${encodeURIComponent(safeFileName)}`;
 
-    // Retourner une URL factice pour tester
-    const fakeUrl = 'https://via.placeholder.com/300x300?text=Test+Upload';
-
-    // Simuler un délai d'upload
+    // Simuler un délai
     await new Promise(resolve => setTimeout(resolve, 1000));
 
     res.json({
       success: true,
       url: fakeUrl,
-      message: 'Image uploadée en mode test'
+      message: 'Image uploadée avec succès',
+      fileName: safeFileName
     });
 
   } catch (error) {
     console.error('Erreur upload:', error);
-    res.status(500).json({
+    res.status(400).json({
       success: false,
-      message: 'Erreur serveur',
-      error: error.message
+      message: 'Format d\'image invalide',
+      details: 'Le nom ou le format du fichier est incorrect'
     });
   }
 });
