@@ -72,6 +72,7 @@ router.get('/', authenticateToken, async (req, res) => {
     }
 });
 
+
 // Helpers
 function formatTime(date) {
     const now = new Date();
