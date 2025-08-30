@@ -52,40 +52,73 @@ const uploadToImgBB = async (buffer, originalName) => {
   }
 };
 
-// Route principale pour upload d'image - CORRIGÉ
+
+
 router.post('/image', authenticateToken, async (req, res) => {
+  console.log('=== DÉBUT UPLOAD ===');
+  console.log('User:', req.user.id);
+  console.log('Headers:', req.headers);
+
   try {
-    // Gérer l'upload avec multer
-    const multerUpload = upload;
+    // Middleware multer custom pour mieux debugger
+    const multerUpload = multer({
+      storage: multer.memoryStorage(),
+      limits: { fileSize: 5 * 1024 * 1024 },
+      fileFilter: (req, file, cb) => {
+        console.log('File received:', {
+          originalname: file.originalname,
+          mimetype: file.mimetype,
+          size: file.size
+        });
+        cb(null, true);
+      }
+    }).single('image');
 
     multerUpload(req, res, async (err) => {
+      console.log('Multer callback executed');
+
       if (err) {
+        console.error('Multer error:', err);
         return res.status(400).json({
-          error: err.message === 'File too large'
-            ? 'Le fichier est trop volumineux (max 5MB)'
-            : err.message
+          error: err.message,
+          details: 'Multer file upload failed'
         });
       }
 
       if (!req.file) {
-        return res.status(400).json({ error: 'Aucun fichier image fourni' });
+        console.log('No file in request');
+        console.log('Request body:', req.body);
+        console.log('Request files:', req.files);
+        return res.status(400).json({
+          error: 'Aucun fichier image fourni',
+          details: 'Le champ "image" est vide ou manquant'
+        });
       }
+
+      console.log('File processed successfully:', {
+        originalname: req.file.originalname,
+        mimetype: req.file.mimetype,
+        size: req.file.size
+      });
 
       try {
         // 1. Traitement image
-        console.log('Traitement image...');
+        console.log('Processing image with sharp...');
         const optimizedImage = await processImage(req.file.buffer);
+        console.log('Image processed successfully');
 
         // 2. Upload ImgBB
-        console.log('Upload vers ImgBB...');
+        console.log('Uploading to ImgBB...');
         const imageUrl = await uploadToImgBB(optimizedImage, req.file.originalname);
+        console.log('ImgBB upload successful:', imageUrl);
 
         // 3. Sauvegarde BDD
-        console.log('Sauvegarde BDD...');
+        console.log('Saving to database...');
         const user = await prisma.user.findUnique({
           where: { id: req.user.id },
           include: { etudiant: true, admin: true }
         });
+
 
         let updated;
         if (user.role === 'ETUDIANT' && user.etudiant) {
@@ -110,20 +143,26 @@ router.post('/image', authenticateToken, async (req, res) => {
           user: updated
         });
 
+
       } catch (error) {
-        console.error('Erreur traitement:', error);
+        console.error('Processing error:', error);
         res.status(500).json({
-          error: error.message || 'Erreur lors du traitement de l\'image'
+          error: error.message,
+          details: 'Erreur lors du traitement'
         });
       }
     });
 
   } catch (error) {
-    console.error('Erreur upload:', error);
+    console.error('Unexpected error:', error);
     res.status(500).json({
-      error: 'Erreur interne du serveur'
+      error: 'Erreur interne du serveur',
+      details: error.message
     });
   }
 });
+
+
+
 
 export default router;
