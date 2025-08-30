@@ -11,7 +11,7 @@ const router = express.Router();
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 } // 5MB
-}).single('photo');
+}).single('image');
 
 // Middleware de traitement d'image
 const processImage = async (buffer) => {
