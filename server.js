@@ -37,7 +37,7 @@ const app = express();
 // Configuration CORS
 app.use(cors({
     origin: process.env.FRONTEND_URL || 'https://sys-voteucao-frontend-64pi.vercel.app',
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true
 }));
