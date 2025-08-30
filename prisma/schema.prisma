@@ -23,19 +23,32 @@ enum ElectionType {
   UNIVERSITE
 }
 
+enum CandidateStatus {
+  EN_ATTENTE
+  APPROUVE
+  REJETE
+}
+
+enum ElectionNiveau {
+  PHASE1
+  PHASE2
+  PHASE3
+}
+
 model User {
   id                   String   @id @default(cuid())
-  email                String   @unique
-  password             String
+  email                String   @unique @db.VarChar(255)
+  password             String   @db.VarChar(255)
   role                 Role     @default(ADMIN)
   createdAt            DateTime @default(now())
-  actif                Boolean @default(true)
-  tempPassword         String?
+  actif                Boolean  @default(true)
+  tempPassword         String?  @db.VarChar(255)
   requirePasswordChange Boolean @default(false)
   passwordResetExpires DateTime?
 
-  etudiant             Etudiant? @relation("UserToEtudiant")
-  admin                Admin?    @relation("UserToAdmin")
+  // Relations
+  etudiant             Etudiant?
+  admin                Admin?
   votes                Vote[]
   candidates           Candidate[]
   generatedCodes       RegistrationCode[] @relation("GeneratedCodes")
@@ -43,59 +56,76 @@ model User {
   voteTokens           VoteToken[]
   activityLogs         ActivityLog[] @relation("UserActivityLogs")
   notifications        Notification[]
+
+  @@map("users")
 }
 
 model Etudiant {
   id              Int     @id @default(autoincrement())
   userId          String? @unique
-  matricule       String? @unique
-  codeInscription String? @unique
-  identifiantTemporaire String? @unique
-  nom             String?
-  prenom          String?
-  filiere         String?
+  matricule       String? @unique @db.VarChar(50)
+  codeInscription String? @unique @db.VarChar(50)
+  identifiantTemporaire String? @unique @db.VarChar(50)
+  nom             String? @db.VarChar(100)
+  prenom          String? @db.VarChar(100)
+  filiere         String? @db.VarChar(100)
   annee           Int?
-  photoUrl        String?
-  ecole           String?
-  user            User?   @relation("UserToEtudiant", fields: [userId], references: [id])
+  photoUrl        String? @db.VarChar(500)
+  ecole           String? @db.VarChar(100)
+  
+  // Relations
+  user            User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
   responsableSalle ResponsableSalle[]
+
+  @@map("etudiants")
 }
 
 model Election {
   id          Int         @id @default(autoincrement())
   type        ElectionType
-  titre       String
-  description String?
+  titre       String      @db.VarChar(200)
+  description String?     @db.Text
   dateDebut   DateTime
   dateFin     DateTime
   dateDebutCandidature DateTime
   dateFinCandidature  DateTime
   createdAt   DateTime    @default(now())
-  filiere     String?
+  filiere     String?     @db.VarChar(100)
   annee       Int?
-  ecole       String?
-  niveau      String?
+  ecole       String?     @db.VarChar(100)
+  niveau      ElectionNiveau?
   delegueType DelegueType?
   isActive    Boolean     @default(true)
 
+  // Relations
   candidates  Candidate[]
   votes       Vote[]
   voteTokens  VoteToken[]
+
+  @@map("elections")
 }
 
 model Candidate {
-  id         Int       @id @default(autoincrement())
-  nom        String
-  prenom     String
-  program    String?
-  photoUrl   String?
+  id         Int             @id @default(autoincrement())
+  nom        String          @db.VarChar(100)
+  prenom     String          @db.VarChar(100)
+  slogan     String          @db.VarChar(200)
+  programme  String          @db.Text
+  motivation String          @db.Text
+  photoUrl   String          @db.VarChar(500)
+  statut     CandidateStatus @default(EN_ATTENTE)
   userId     String
   electionId Int
-  createdAt  DateTime @default(now())
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
 
-  election   Election  @relation(fields: [electionId], references: [id])
-  user       User      @relation(fields: [userId], references: [id])
+  // Relations
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  election   Election @relation(fields: [electionId], references: [id], onDelete: Cascade)
   votes      Vote[]
+
+  @@unique([userId, electionId])
+  @@map("candidates")
 }
 
 model Vote {
@@ -106,38 +136,44 @@ model Vote {
   createdAt   DateTime  @default(now())
   poidsVote   Float
 
-  user        User      @relation(fields: [userId], references: [id])
-  election    Election  @relation(fields: [electionId], references: [id])
-  candidate   Candidate @relation(fields: [candidateId], references: [id])
+  // Relations
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  election    Election  @relation(fields: [electionId], references: [id], onDelete: Cascade)
+  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
 
   @@unique([userId, electionId])
+  @@map("votes")
 }
 
 model ResponsableSalle {
   id         Int      @id @default(autoincrement())
   etudiantId Int
-  filiere    String
+  filiere    String   @db.VarChar(100)
   annee      Int
-  ecole      String
+  ecole      String   @db.VarChar(100)
   createdAt  DateTime @default(now())
 
-  etudiant   Etudiant @relation(fields: [etudiantId], references: [id])
+  // Relations
+  etudiant   Etudiant @relation(fields: [etudiantId], references: [id], onDelete: Cascade)
   delegueEcole DelegueEcole[]
 
   @@unique([etudiantId, annee])
+  @@map("responsables_salle")
 }
 
 model DelegueEcole {
   id              Int      @id @default(autoincrement())
   responsableId   Int
   typeDelegue     DelegueType
-  ecole           String
+  ecole           String   @db.VarChar(100)
   createdAt       DateTime @default(now())
 
-  responsable     ResponsableSalle @relation(fields: [responsableId], references: [id])
+  // Relations
+  responsable     ResponsableSalle @relation(fields: [responsableId], references: [id], onDelete: Cascade)
   delegueUniversitaire DelegueUniversite[]
 
   @@unique([responsableId, typeDelegue, ecole])
+  @@map("delegues_ecole")
 }
 
 model DelegueUniversite {
@@ -146,23 +182,29 @@ model DelegueUniversite {
   typeDelegue   DelegueType
   createdAt     DateTime @default(now())
 
-  delegueEcole  DelegueEcole @relation(fields: [delegueEcoleId], references: [id])
+  // Relations
+  delegueEcole  DelegueEcole @relation(fields: [delegueEcoleId], references: [id], onDelete: Cascade)
+
+  @@map("delegues_universite")
 }
 
 model Admin {
   id      Int    @id @default(autoincrement())
   userId  String @unique
-  nom     String
-  prenom  String
-  poste   String
-  email   String
+  nom     String @db.VarChar(100)
+  prenom  String @db.VarChar(100)
+  poste   String @db.VarChar(100)
+  email   String @db.VarChar(255)
 
-  user    User   @relation("UserToAdmin", fields: [userId], references: [id])
+  // Relations
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("admins")
 }
 
 model RegistrationCode {
   id          String   @id @default(cuid())
-  code        String   @unique
+  code        String   @unique @db.VarChar(50)
   createdAt   DateTime @default(now())
   expiresAt   DateTime
   used        Boolean  @default(false)
@@ -171,6 +213,7 @@ model RegistrationCode {
   generatedBy String
   usedBy      String? @unique
 
+  // Relations
   generatedByUser User @relation("GeneratedCodes", fields: [generatedBy], references: [id], onDelete: Cascade)
   usedByUser      User? @relation("UsedCodes", fields: [usedBy], references: [id], onDelete: Cascade)
 
@@ -179,7 +222,7 @@ model RegistrationCode {
 
 model VoteToken {
   id          Int       @id @default(autoincrement())
-  token       String    @unique
+  token       String    @unique @db.VarChar(255)
   userId      String
   electionId  Int
   isUsed      Boolean   @default(false)
@@ -187,34 +230,41 @@ model VoteToken {
   expiresAt   DateTime
   usedAt      DateTime?
 
-  user        User      @relation(fields: [userId], references: [id])
-  election    Election  @relation(fields: [electionId], references: [id])
+  // Relations
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  election    Election  @relation(fields: [electionId], references: [id], onDelete: Cascade)
 
   @@unique([userId, electionId])
+  @@map("vote_tokens")
 }
 
 model ActivityLog {
   id        Int      @id @default(autoincrement())
-  action    String
-  details   String?
+  action    String   @db.VarChar(100)
+  details   String?  @db.Text
   userId    String?
-  actionType String @default("INFO")
+  actionType String  @default("INFO") @db.VarChar(20)
   createdAt DateTime @default(now())
 
-  user      User?    @relation("UserActivityLogs", fields: [userId], references: [id])
+  // Relations
+  user      User?    @relation("UserActivityLogs", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("activity_logs")
 }
 
 model Notification {
   id        String   @id @default(cuid())
-  title     String
-  message   String
-  type      String
-  priority  String
+  title     String   @db.VarChar(200)
+  message   String   @db.Text
+  type      String   @db.VarChar(50)
+  priority  String   @db.VarChar(20)
   read      Boolean  @default(false)
-  relatedEntity String?
-  entityId  String?
+  relatedEntity String? @db.VarChar(100)
+  entityId  String?  @db.VarChar(50)
 
   userId    String
+
+  // Relations
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   createdAt DateTime @default(now())
@@ -224,4 +274,5 @@ model Notification {
   @@index([read])
   @@index([createdAt])
   @@index([userId, read])
+  @@map("notifications")
 }
