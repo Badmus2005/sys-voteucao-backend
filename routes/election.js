@@ -194,8 +194,57 @@ router.post('/', authenticateToken, async (req, res) => {
             return res.status(403).json({ message: 'Accès refusé' });
         }
 
-        const { type, titre, description, dateDebut, dateFin, filiere, annee, ecole, niveau, delegueType } = req.body;
+        const {
+            type,
+            titre,
+            description,
+            dateDebut,
+            dateFin,
+            dateDebutCandidature,
+            dateFinCandidature,
+            filiere,
+            annee,
+            ecole,
+            niveau,
+            delegueType
+        } = req.body;
 
+        // VALIDATION DES DATES
+        const now = new Date();
+        const debutCandidature = new Date(dateDebutCandidature);
+        const finCandidature = new Date(dateFinCandidature);
+        const debutVote = new Date(dateDebut);
+        const finVote = new Date(dateFin);
+
+        // Validation: dates de candidature doivent être avant le vote
+        if (finCandidature >= debutVote) {
+            return res.status(400).json({
+                message: 'La fin des candidatures doit être avant le début du vote'
+            });
+        }
+
+        // Validation: dates de candidature cohérentes
+        if (debutCandidature >= finCandidature) {
+            return res.status(400).json({
+                message: 'La date de début des candidatures doit être avant la date de fin'
+            });
+        }
+
+        // Validation: dates de vote cohérentes
+        if (debutVote >= finVote) {
+            return res.status(400).json({
+                message: 'La date de début du vote doit être avant la date de fin'
+            });
+        }
+
+        // Validation: les dates ne doivent pas être dans le passé
+        if (debutCandidature < now) {
+            return res.status(400).json({
+                message: 'La date de début des candidatures ne peut pas être dans le passé'
+            });
+        }
+
+        // Validations spécifiques au type d'élection
         if (type === 'SALLE' && (!filiere || !annee)) {
             return res.status(400).json({
                 message: 'Les élections par salle nécessitent filière et année'
@@ -208,18 +257,27 @@ router.post('/', authenticateToken, async (req, res) => {
             });
         }
 
+        // Conversion du delegueType si nécessaire
+        let delegueTypePrisma = null;
+        if (delegueType) {
+            delegueTypePrisma = delegueType.toUpperCase() === 'PREMIER' ? 'PREMIER' : 'DEUXIEME';
+        }
+
+        // Création de l'élection
         const election = await prisma.election.create({
             data: {
                 type: type.toUpperCase(),
                 titre,
                 description,
-                dateDebut: new Date(dateDebut),
-                dateFin: new Date(dateFin),
+                dateDebut: debutVote,
+                dateFin: finVote,
+                dateDebutCandidature: debutCandidature,
+                dateFinCandidature: finCandidature,
                 filiere,
                 annee: annee ? parseInt(annee) : null,
                 ecole,
                 niveau: parseInt(niveau),
-                delegueType: delegueType || null
+                delegueType: delegueTypePrisma
             }
         });
 
@@ -227,10 +285,11 @@ router.post('/', authenticateToken, async (req, res) => {
 
         res.status(201).json({
             message: 'Élection créée avec succès',
-            electionId: election.id
+            electionId: election.id,
+            election: election
         });
     } catch (error) {
-        console.error(error);
+        console.error('Erreur création élection:', error);
         res.status(500).json({ message: 'Erreur serveur' });
     }
 });
@@ -377,6 +436,73 @@ router.get('/stats/by-type/:type', async (req, res) => {
         res.status(500).json({
             message: 'Erreur serveur lors de la récupération des statistiques',
             error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
+    }
+});
+
+
+// Vérifier si l'utilisateur est déjà candidat à une élection (avec détails)
+router.get('/is-candidate/:electionId', authenticateToken, async (req, res) => {
+    try {
+        const { electionId } = req.params;
+
+        // Vérifier que l'élection existe
+        const election = await prisma.election.findUnique({
+            where: { id: parseInt(electionId) }
+        });
+
+        if (!election) {
+            return res.status(404).json({
+                message: 'Élection non trouvée',
+                isCandidate: false
+            });
+        }
+
+        // Vérifier si l'utilisateur est déjà candidat pour cette élection
+        const existingCandidate = await prisma.candidate.findFirst({
+            where: {
+                userId: req.user.id,
+                electionId: parseInt(electionId)
+            },
+            include: {
+                election: {
+                    select: {
+                        titre: true,
+                        type: true
+                    }
+                }
+            }
+        });
+
+        if (existingCandidate) {
+            res.json({
+                isCandidate: true,
+                candidate: {
+                    id: existingCandidate.id,
+                    nom: existingCandidate.nom,
+                    prenom: existingCandidate.prenom,
+                    program: existingCandidate.program,
+                    photoUrl: existingCandidate.photoUrl,
+                    createdAt: existingCandidate.createdAt
+                },
+                election: {
+                    id: existingCandidate.election.id,
+                    titre: existingCandidate.election.titre,
+                    type: existingCandidate.election.type
+                }
+            });
+        } else {
+            res.json({
+                isCandidate: false,
+                message: 'Vous n\'êtes pas candidat à cette élection'
+            });
+        }
+
+    } catch (error) {
+        console.error('Erreur vérification candidature:', error);
+        res.status(500).json({
+            message: 'Erreur serveur',
+            isCandidate: false
         });
     }
 });

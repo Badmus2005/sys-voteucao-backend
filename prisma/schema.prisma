@@ -68,11 +68,13 @@ model Election {
   description String?
   dateDebut   DateTime
   dateFin     DateTime
+  dateDebutCandidature DateTime
+  dateFinCandidature  DateTime
   createdAt   DateTime    @default(now())
   filiere     String?
   annee       Int?
   ecole       String?
-  niveau      Int
+  niveau      String?
   delegueType DelegueType?
   isActive    Boolean     @default(true)
 
