@@ -9,7 +9,11 @@ const router = express.Router();
 router.get('/', async (req, res) => {
     try {
         const elections = await prisma.election.findMany({
-            where: { isActive: true },
+            where: {
+                isActive: true,
+                dateDebut: { lte: new Date() },
+                dateFin: { gte: new Date() }
+            },
             include: {
                 candidates: {
                     include: {
@@ -57,7 +61,10 @@ router.get('/by-type/:type', async (req, res) => {
             whereClause.isActive = true;
             whereClause.dateDebut = { gt: new Date() };
         } else if (status === 'closed') {
-            whereClause.isActive = false;
+            whereClause.OR = [
+                { isActive: false },
+                { dateFin: { lt: new Date() } }
+            ];
         }
 
         if (type.toUpperCase() === 'SALLE') {
@@ -257,10 +264,26 @@ router.post('/', authenticateToken, async (req, res) => {
             });
         }
 
+        // Conversion du niveau si nécessaire
+        let niveauPrisma = null;
+        if (niveau) {
+            niveauPrisma = niveau.toUpperCase();
+            if (!['PHASE1', 'PHASE2', 'PHASE3'].includes(niveauPrisma)) {
+                return res.status(400).json({
+                    message: 'Niveau d\'élection invalide. Valeurs valides: PHASE1, PHASE2, PHASE3'
+                });
+            }
+        }
+
         // Conversion du delegueType si nécessaire
         let delegueTypePrisma = null;
         if (delegueType) {
-            delegueTypePrisma = delegueType.toUpperCase() === 'PREMIER' ? 'PREMIER' : 'DEUXIEME';
+            delegueTypePrisma = delegueType.toUpperCase();
+            if (!['PREMIER', 'DEUXIEME'].includes(delegueTypePrisma)) {
+                return res.status(400).json({
+                    message: 'Type de délégué invalide. Valeurs valides: PREMIER, DEUXIEME'
+                });
+            }
         }
 
         // Création de l'élection
@@ -276,7 +299,7 @@ router.post('/', authenticateToken, async (req, res) => {
                 filiere,
                 annee: annee ? parseInt(annee) : null,
                 ecole,
-                niveau: niveau.toUpperCase(),
+                niveau: niveauPrisma,
                 delegueType: delegueTypePrisma
             }
         });
@@ -336,10 +359,23 @@ router.delete('/:id', authenticateToken, async (req, res) => {
         }
 
         const { id } = req.params;
+
+        // Supprimer les votes associés
         await prisma.vote.deleteMany({
             where: { electionId: parseInt(id) }
         });
 
+        // Supprimer les candidats associés
+        await prisma.candidate.deleteMany({
+            where: { electionId: parseInt(id) }
+        });
+
+        // Supprimer les jetons de vote associés
+        await prisma.voteToken.deleteMany({
+            where: { electionId: parseInt(id) }
+        });
+
+        // Supprimer l'élection
         await prisma.election.delete({
             where: { id: parseInt(id) }
         });
@@ -400,14 +436,21 @@ router.get('/stats/by-type/:type', async (req, res) => {
             prisma.election.count({
                 where: {
                     ...whereClause,
-                    isActive: false
+                    OR: [
+                        { isActive: false },
+                        { dateFin: { lt: new Date() } }
+                    ]
                 }
             }),
             prisma.vote.count({
-                where: { election: whereClause }
+                where: {
+                    election: whereClause
+                }
             }),
             prisma.candidate.count({
-                where: { election: whereClause }
+                where: {
+                    election: whereClause
+                }
             })
         ]);
 
@@ -440,13 +483,13 @@ router.get('/stats/by-type/:type', async (req, res) => {
     }
 });
 
-
 // FONCTION: Générer les jetons pour une élection
 async function generateVoteTokensForElection(election) {
     try {
         let eligibleStudents = [];
 
         if (election.type === 'SALLE') {
+            // Pour les élections de salle, tous les étudiants de la filière et année
             eligibleStudents = await prisma.etudiant.findMany({
                 where: {
                     filiere: election.filiere,
@@ -455,6 +498,7 @@ async function generateVoteTokensForElection(election) {
                 include: { user: true }
             });
         } else if (election.type === 'ECOLE') {
+            // Pour les élections d'école, les responsables de salle de cette école
             const responsables = await prisma.responsableSalle.findMany({
                 where: { ecole: election.ecole },
                 include: {
@@ -465,6 +509,7 @@ async function generateVoteTokensForElection(election) {
             });
             eligibleStudents = responsables.map(r => r.etudiant);
         } else if (election.type === 'UNIVERSITE') {
+            // Pour les élections universitaires, les délégués d'école
             const deleguesEcole = await prisma.delegueEcole.findMany({
                 include: {
                     responsable: {
@@ -481,8 +526,11 @@ async function generateVoteTokensForElection(election) {
 
         console.log(`Génération de ${eligibleStudents.length} jetons pour l'élection ${election.titre}`);
 
+        // Générer les jetons de vote pour chaque étudiant éligible
         for (const student of eligibleStudents) {
-            await VoteToken.createToken(student.userId, election.id);
+            if (student.userId) {
+                await VoteToken.createToken(student.userId, election.id);
+            }
         }
 
         console.log('Jetons de vote générés avec succès');
