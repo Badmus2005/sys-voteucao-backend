@@ -1,8 +1,7 @@
 import express from 'express';
-import multer from 'multer';
+import multer from 'multer';  // ⬅️ multer fournit memoryStorage()
 import axios from 'axios';
 import FormData from 'form-data';
-import fs from 'fs';
 import prisma from '../prisma.js';
 import { authenticateToken } from '../middlewares/auth.js';
 
@@ -10,16 +9,19 @@ const router = express.Router();
 
 const IMGBB_UPLOAD_URL = 'https://api.imgbb.com/1/upload';
 
-// Configuration Multer identique à votre route avatar
+// ✅ CONFIGURATION CORRECTE avec memoryStorage
 const upload = multer({
-  dest: '/tmp/uploads',  // Utilisez /tmp pour le stockage temporaire
-  limits: { fileSize: 2 * 1024 * 1024 }, // 2MB
+  storage: multer.memoryStorage(),  // ⬅️ Utilisation correcte
+  limits: {
+    fileSize: 2 * 1024 * 1024,
+    files: 1
+  },
   fileFilter: (req, file, cb) => {
-    const allowedTypes = ['image/jpeg', 'image/png'];
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/jpg'];
     if (allowedTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error('Type de fichier non supporté (JPEG, PNG uniquement)'));
+      cb(new Error('Type de fichier non supporté. Utilisez JPEG ou PNG.'));
     }
   }
 });
@@ -36,11 +38,18 @@ router.post('/image', authenticateToken, upload.single('image'), async (req, res
       });
     }
 
-    console.log('Fichier reçu:', req.file);
+    console.log('Fichier reçu:', {
+      originalname: req.file.originalname,
+      mimetype: req.file.mimetype,
+      size: req.file.size
+    });
 
-    // Créer un FormData pour ImgBB
+    // Préparer FormData pour ImgBB
     const formData = new FormData();
-    formData.append('image', fs.createReadStream(req.file.path));
+    formData.append('image', req.file.buffer, {
+      filename: req.file.originalname || 'image.jpg',
+      contentType: req.file.mimetype
+    });
 
     // Envoyer à ImgBB
     console.log('Envoi à ImgBB...');
@@ -48,13 +57,13 @@ router.post('/image', authenticateToken, upload.single('image'), async (req, res
       `${IMGBB_UPLOAD_URL}?key=${process.env.IMGBB_API_KEY}`,
       formData,
       {
-        headers: formData.getHeaders(),
-        timeout: 10000
+        headers: {
+          ...formData.getHeaders(),
+          'Content-Type': 'multipart/form-data'
+        },
+        timeout: 30000
       }
     );
-
-    // Supprimer le fichier temporaire après upload
-    fs.unlinkSync(req.file.path);
 
     if (!response.data.success) {
       throw new Error('Échec de l\'upload vers ImgBB');
@@ -63,8 +72,6 @@ router.post('/image', authenticateToken, upload.single('image'), async (req, res
     const imgbbUrl = response.data.data.url;
     console.log('Upload ImgBB réussi:', imgbbUrl);
 
-    // Ici, on ne sauvegarde pas directement dans le profil étudiant
-    // On retourne juste l'URL pour qu'elle soit utilisée dans la candidature
     res.json({
       success: true,
       url: imgbbUrl,
@@ -73,11 +80,6 @@ router.post('/image', authenticateToken, upload.single('image'), async (req, res
 
   } catch (error) {
     console.error('Erreur upload image candidature:', error);
-
-    // Nettoyage du fichier temporaire en cas d'erreur
-    if (req.file?.path && fs.existsSync(req.file.path)) {
-      fs.unlinkSync(req.file.path);
-    }
 
     let errorMessage = 'Erreur lors de l\'upload';
     let statusCode = 500;
@@ -91,12 +93,14 @@ router.post('/image', authenticateToken, upload.single('image'), async (req, res
     } else if (error.code === 'ECONNABORTED') {
       errorMessage = 'Timeout lors de l\'upload';
       statusCode = 408;
+    } else if (error.response?.data?.error?.message) {
+      errorMessage = error.response.data.error.message;
     }
 
     res.status(statusCode).json({
       success: false,
       message: errorMessage,
-      details: error.response?.data?.error?.message || error.message
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
