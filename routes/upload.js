@@ -26,7 +26,7 @@ const upload = multer({
   }
 });
 
-// Route pour l'upload des photos de candidature
+// Dans votre route backend, remplacez temporairement la partie ImgBB :
 router.post('/image', authenticateToken, upload.single('image'), async (req, res) => {
   try {
     console.log('Début upload image candidature');
@@ -38,69 +38,27 @@ router.post('/image', authenticateToken, upload.single('image'), async (req, res
       });
     }
 
-    console.log('Fichier reçu:', {
-      originalname: req.file.originalname,
-      mimetype: req.file.mimetype,
-      size: req.file.size
-    });
+    // ⚠️ SOLUTION TEMPORAIRE - Contournement ImgBB
+    console.log('⚠️ Mode test - contournement ImgBB activé');
 
-    // Préparer FormData pour ImgBB
-    const formData = new FormData();
-    formData.append('image', req.file.buffer, {
-      filename: req.file.originalname || 'image.jpg',
-      contentType: req.file.mimetype
-    });
+    // Retourner une URL factice pour tester
+    const fakeUrl = 'https://via.placeholder.com/300x300?text=Test+Upload';
 
-    // Envoyer à ImgBB
-    console.log('Envoi à ImgBB...');
-    const response = await axios.post(
-      `${IMGBB_UPLOAD_URL}?key=${process.env.IMGBB_API_KEY}`,
-      formData,
-      {
-        headers: {
-          ...formData.getHeaders(),
-          'Content-Type': 'multipart/form-data'
-        },
-        timeout: 30000
-      }
-    );
-
-    if (!response.data.success) {
-      throw new Error('Échec de l\'upload vers ImgBB');
-    }
-
-    const imgbbUrl = response.data.data.url;
-    console.log('Upload ImgBB réussi:', imgbbUrl);
+    // Simuler un délai d'upload
+    await new Promise(resolve => setTimeout(resolve, 1000));
 
     res.json({
       success: true,
-      url: imgbbUrl,
-      message: 'Image uploadée avec succès'
+      url: fakeUrl,
+      message: 'Image uploadée en mode test'
     });
 
   } catch (error) {
-    console.error('Erreur upload image candidature:', error);
-
-    let errorMessage = 'Erreur lors de l\'upload';
-    let statusCode = 500;
-
-    if (error.message.includes('Type de fichier non supporté')) {
-      errorMessage = 'Type de fichier non supporté (JPEG, PNG uniquement)';
-      statusCode = 400;
-    } else if (error.message.includes('File too large')) {
-      errorMessage = 'Le fichier est trop volumineux (max 2MB)';
-      statusCode = 400;
-    } else if (error.code === 'ECONNABORTED') {
-      errorMessage = 'Timeout lors de l\'upload';
-      statusCode = 408;
-    } else if (error.response?.data?.error?.message) {
-      errorMessage = error.response.data.error.message;
-    }
-
-    res.status(statusCode).json({
+    console.error('Erreur upload:', error);
+    res.status(500).json({
       success: false,
-      message: errorMessage,
-      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+      message: 'Erreur serveur',
+      error: error.message
     });
   }
 });
