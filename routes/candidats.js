@@ -505,4 +505,443 @@ router.delete('/:id', authenticateToken, async (req, res) => {
 });
 
 
+// GET /api/candidats/admin/list - Liste des candidats pour l'admin avec filtres
+router.get('/admin/list', authenticateToken, async (req, res) => {
+    try {
+        // Vérifier que l'utilisateur est admin
+        const user = await prisma.user.findUnique({
+            where: { id: req.user.id },
+            include: { admin: true }
+        });
+
+        if (!user || user.role !== 'ADMIN') {
+            return res.status(403).json({ message: 'Accès refusé' });
+        }
+
+        const {
+            electionId,
+            statut,
+            search,
+            page = 1,
+            limit = 10
+        } = req.query;
+
+        // Construction de la clause WHERE
+        const whereClause = {};
+
+        if (electionId && electionId !== 'all') {
+            whereClause.electionId = parseInt(electionId);
+        }
+
+        if (statut && statut !== 'all') {
+            whereClause.statut = statut;
+        }
+
+        if (search) {
+            whereClause.OR = [
+                { nom: { contains: search, mode: 'insensitive' } },
+                { prenom: { contains: search, mode: 'insensitive' } },
+                {
+                    user: {
+                        email: { contains: search, mode: 'insensitive' },
+                        etudiant: {
+                            OR: [
+                                { matricule: { contains: search, mode: 'insensitive' } },
+                                { filiere: { contains: search, mode: 'insensitive' } }
+                            ]
+                        }
+                    }
+                },
+                { election: { titre: { contains: search, mode: 'insensitive' } } }
+            ];
+        }
+
+        // Pagination
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+        const take = parseInt(limit);
+
+        const [candidates, total] = await Promise.all([
+            prisma.candidate.findMany({
+                where: whereClause,
+                include: {
+                    user: {
+                        include: {
+                            etudiant: {
+                                select: {
+                                    id: true,
+                                    matricule: true,
+                                    filiere: true,
+                                    annee: true,
+                                    ecole: true,
+                                    photoUrl: true
+                                }
+                            }
+                        }
+                    },
+                    election: {
+                        select: {
+                            id: true,
+                            titre: true,
+                            type: true,
+                            dateDebut: true,
+                            dateFin: true
+                        }
+                    },
+                    _count: {
+                        select: {
+                            votes: true
+                        }
+                    }
+                },
+                orderBy: {
+                    createdAt: 'desc'
+                },
+                skip,
+                take
+            }),
+            prisma.candidate.count({ where: whereClause })
+        ]);
+
+        const totalPages = Math.ceil(total / parseInt(limit));
+
+        // Formater la réponse
+        const formattedCandidates = candidates.map(candidate => ({
+            id: candidate.id,
+            nom: candidate.nom,
+            prenom: candidate.prenom,
+            slogan: candidate.slogan,
+            programme: candidate.programme,
+            motivation: candidate.motivation,
+            photoUrl: candidate.photoUrl,
+            statut: candidate.statut,
+            createdAt: candidate.createdAt,
+            updatedAt: candidate.updatedAt,
+            user: {
+                id: candidate.user.id,
+                email: candidate.user.email,
+                etudiant: candidate.user.etudiant ? {
+                    id: candidate.user.etudiant.id,
+                    matricule: candidate.user.etudiant.matricule,
+                    filiere: candidate.user.etudiant.filiere,
+                    annee: candidate.user.etudiant.annee,
+                    ecole: candidate.user.etudiant.ecole,
+                    photoUrl: candidate.user.etudiant.photoUrl
+                } : null
+            },
+            election: {
+                id: candidate.election.id,
+                titre: candidate.election.titre,
+                type: candidate.election.type,
+                dateDebut: candidate.election.dateDebut,
+                dateFin: candidate.election.dateFin
+            },
+            votesCount: candidate._count.votes
+        }));
+
+        res.json({
+            success: true,
+            candidates: formattedCandidates,
+            pagination: {
+                currentPage: parseInt(page),
+                totalPages,
+                totalCandidates: total,
+                hasNext: parseInt(page) < totalPages,
+                hasPrev: parseInt(page) > 1
+            }
+        });
+
+    } catch (error) {
+        console.error('Erreur récupération candidats admin:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Erreur serveur lors de la récupération des candidats'
+        });
+    }
+});
+
+// GET /api/candidats/admin/stats - Statistiques pour l'admin
+router.get('/admin/stats', authenticateToken, async (req, res) => {
+    try {
+        // Vérifier que l'utilisateur est admin
+        const user = await prisma.user.findUnique({
+            where: { id: req.user.id },
+            include: { admin: true }
+        });
+
+        if (!user || user.role !== 'ADMIN') {
+            return res.status(403).json({ message: 'Accès refusé' });
+        }
+
+        const [total, enAttente, approuves, rejetes] = await Promise.all([
+            prisma.candidate.count(),
+            prisma.candidate.count({ where: { statut: 'EN_ATTENTE' } }),
+            prisma.candidate.count({ where: { statut: 'APPROUVE' } }),
+            prisma.candidate.count({ where: { statut: 'REJETE' } })
+        ]);
+
+        res.json({
+            success: true,
+            stats: {
+                total,
+                enAttente,
+                approuves,
+                rejetes
+            }
+        });
+
+    } catch (error) {
+        console.error('Erreur récupération stats:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Erreur serveur lors de la récupération des statistiques'
+        });
+    }
+});
+
+// PATCH /api/candidats/:id/status - Mettre à jour le statut d'un candidat (Admin seulement)
+router.patch('/:id/status', authenticateToken, async (req, res) => {
+    try {
+        // Vérifier que l'utilisateur est admin
+        const user = await prisma.user.findUnique({
+            where: { id: req.user.id },
+            include: { admin: true }
+        });
+
+        if (!user || user.role !== 'ADMIN') {
+            return res.status(403).json({ message: 'Accès refusé' });
+        }
+
+        const candidateId = parseInt(req.params.id);
+        const { statut } = req.body;
+
+        if (isNaN(candidateId)) {
+            return res.status(400).json({
+                success: false,
+                message: 'ID de candidat invalide'
+            });
+        }
+
+        if (!statut || !['EN_ATTENTE', 'APPROUVE', 'REJETE'].includes(statut)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Statut invalide. Valeurs acceptées: EN_ATTENTE, APPROUVE, REJETE'
+            });
+        }
+
+        // Vérifier que le candidat existe
+        const candidate = await prisma.candidate.findUnique({
+            where: { id: candidateId },
+            include: {
+                user: {
+                    include: {
+                        etudiant: true
+                    }
+                },
+                election: true
+            }
+        });
+
+        if (!candidate) {
+            return res.status(404).json({
+                success: false,
+                message: 'Candidat non trouvé'
+            });
+        }
+
+        // Mettre à jour le statut
+        const updatedCandidate = await prisma.candidate.update({
+            where: { id: candidateId },
+            data: { statut },
+            include: {
+                user: {
+                    include: {
+                        etudiant: {
+                            select: {
+                                nom: true,
+                                prenom: true,
+                                matricule: true,
+                                filiere: true,
+                                annee: true,
+                                ecole: true
+                            }
+                        }
+                    }
+                },
+                election: {
+                    select: {
+                        titre: true,
+                        type: true
+                    }
+                }
+            }
+        });
+
+        // TODO: Envoyer une notification à l'étudiant
+        console.log(`Statut candidature mis à jour: ${candidateId} -> ${statut}`);
+
+        res.json({
+            success: true,
+            message: `Statut de la candidature mis à jour avec succès`,
+            candidate: {
+                id: updatedCandidate.id,
+                nom: updatedCandidate.nom,
+                prenom: updatedCandidate.prenom,
+                statut: updatedCandidate.statut,
+                user: {
+                    email: updatedCandidate.user.email,
+                    etudiant: updatedCandidate.user.etudiant
+                },
+                election: updatedCandidate.election
+            }
+        });
+
+    } catch (error) {
+        console.error('Erreur mise à jour statut:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Erreur serveur lors de la mise à jour du statut'
+        });
+    }
+});
+
+// GET /api/candidats/admin/:id - Récupérer un candidat avec tous les détails pour l'admin
+router.get('/admin/:id', authenticateToken, async (req, res) => {
+    try {
+        // Vérifier que l'utilisateur est admin
+        const user = await prisma.user.findUnique({
+            where: { id: req.user.id },
+            include: { admin: true }
+        });
+
+        if (!user || user.role !== 'ADMIN') {
+            return res.status(403).json({ message: 'Accès refusé' });
+        }
+
+        const candidateId = parseInt(req.params.id);
+
+        if (isNaN(candidateId)) {
+            return res.status(400).json({ message: 'ID de candidat invalide' });
+        }
+
+        const candidate = await prisma.candidate.findUnique({
+            where: { id: candidateId },
+            include: {
+                user: {
+                    include: {
+                        etudiant: {
+                            include: {
+                                user: {
+                                    select: {
+                                        email: true,
+                                        createdAt: true
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                election: {
+                    select: {
+                        id: true,
+                        titre: true,
+                        type: true,
+                        description: true,
+                        dateDebut: true,
+                        dateFin: true,
+                        dateDebutCandidature: true,
+                        dateFinCandidature: true
+                    }
+                },
+                votes: {
+                    include: {
+                        user: {
+                            include: {
+                                etudiant: {
+                                    select: {
+                                        matricule: true,
+                                        filiere: true,
+                                        annee: true
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    orderBy: {
+                        createdAt: 'desc'
+                    },
+                    take: 10 // Derniers 10 votes
+                },
+                _count: {
+                    select: {
+                        votes: true
+                    }
+                }
+            }
+        });
+
+        if (!candidate) {
+            return res.status(404).json({
+                success: false,
+                message: 'Candidat non trouvé'
+            });
+        }
+
+        // Formater la réponse
+        const formattedCandidate = {
+            id: candidate.id,
+            nom: candidate.nom,
+            prenom: candidate.prenom,
+            slogan: candidate.slogan,
+            programme: candidate.programme,
+            motivation: candidate.motivation,
+            photoUrl: candidate.photoUrl,
+            statut: candidate.statut,
+            createdAt: candidate.createdAt,
+            updatedAt: candidate.updatedAt,
+            user: {
+                id: candidate.user.id,
+                email: candidate.user.email,
+                createdAt: candidate.user.createdAt,
+                etudiant: candidate.user.etudiant ? {
+                    id: candidate.user.etudiant.id,
+                    matricule: candidate.user.etudiant.matricule,
+                    nom: candidate.user.etudiant.nom,
+                    prenom: candidate.user.etudiant.prenom,
+                    filiere: candidate.user.etudiant.filiere,
+                    annee: candidate.user.etudiant.annee,
+                    ecole: candidate.user.etudiant.ecole,
+                    photoUrl: candidate.user.etudiant.photoUrl
+                } : null
+            },
+            election: candidate.election,
+            votes: candidate.votes.map(vote => ({
+                id: vote.id,
+                createdAt: vote.createdAt,
+                user: {
+                    email: vote.user.email,
+                    etudiant: vote.user.etudiant ? {
+                        matricule: vote.user.etudiant.matricule,
+                        filiere: vote.user.etudiant.filiere,
+                        annee: vote.user.etudiant.annee
+                    } : null
+                }
+            })),
+            votesCount: candidate._count.votes
+        };
+
+        res.json({
+            success: true,
+            candidate: formattedCandidate
+        });
+
+    } catch (error) {
+        console.error('Erreur récupération détails candidat:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Erreur serveur lors de la récupération des détails du candidat'
+        });
+    }
+});
+
+
 export default router;
