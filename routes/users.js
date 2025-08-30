@@ -7,6 +7,7 @@ import fs from 'fs';
 import bcrypt from 'bcrypt';
 import prisma from '../prisma.js';
 import { authenticateToken } from '../middlewares/auth.js';
+import { url } from 'inspector';
 
 const router = express.Router();
 // Configuration ImgBB
@@ -165,6 +166,7 @@ router.post('/avatar', authenticateToken, upload.single('avatar'), async (req, r
     res.json({
       success: true,
       photoUrl: imgbbUrl,
+      url: imgbbUrl,
       message: 'Avatar mis à jour avec succès'
     });
 
