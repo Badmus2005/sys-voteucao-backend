@@ -10,7 +10,6 @@ router.get('/election/:electionId', authenticateToken, async (req, res) => {
     try {
         const { electionId } = req.params;
 
-        // Vérifier que l'élection existe
         const election = await prisma.election.findUnique({
             where: { id: parseInt(electionId) }
         });
@@ -21,10 +20,10 @@ router.get('/election/:electionId', authenticateToken, async (req, res) => {
             });
         }
 
-        // Récupérer les candidats avec leurs informations utilisateur
         const candidates = await prisma.candidate.findMany({
             where: {
-                electionId: parseInt(electionId)
+                electionId: parseInt(electionId),
+                statut: 'APPROUVE' // Seulement les candidats approuvés
             },
             include: {
                 user: {
@@ -58,20 +57,21 @@ router.get('/election/:electionId', authenticateToken, async (req, res) => {
             }
         });
 
-        // Formater la réponse
         const formattedCandidates = candidates.map(candidate => ({
             id: candidate.id,
             nom: candidate.nom,
             prenom: candidate.prenom,
-            program: candidate.program,
-            photoUrl: candidate.photoUrl || candidate.user.etudiant?.photoUrl,
-            userId: candidate.userId,
-            electionId: candidate.electionId,
+            slogan: candidate.slogan,
+            programme: candidate.programme,
+            motivation: candidate.motivation,
+            photoUrl: candidate.photoUrl,
+            statut: candidate.statut,
             createdAt: candidate.createdAt,
             userDetails: candidate.user.etudiant ? {
                 filiere: candidate.user.etudiant.filiere,
                 annee: candidate.user.etudiant.annee,
-                ecole: candidate.user.etudiant.ecole
+                ecole: candidate.user.etudiant.ecole,
+                photoUrl: candidate.user.etudiant.photoUrl
             } : null,
             electionDetails: {
                 titre: candidate.election.titre,
