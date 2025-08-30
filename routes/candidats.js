@@ -206,93 +206,6 @@ router.get('/:id', async (req, res) => {
 });
 
 // Déposer une candidature à une élection 
-/*router.post('/', authenticateToken, async (req, res) => {
-    try {
-        const { electionId, slogan, photo, programme, motivation } = req.body;
-        const userId = req.user.id;
-
-        console.log('Données reçues:', req.body);
-
-        // Validation des champs requis
-        if (!userId || !electionId || !slogan || !photo || !programme || !motivation) {
-            return res.status(400).json({
-                success: false,
-                message: 'Tous les champs sont requis: electionId, slogan, photo, programme, motivation'
-            });
-        }
-
-        // Vérifier que l'utilisateur existe
-        const user = await prisma.user.findUnique({
-            where: { id: userId },
-            include: { etudiant: true }
-        });
-
-        if (!user) {
-            return res.status(400).json({
-                success: false,
-                message: 'Utilisateur inexistant'
-            });
-        }
-
-        // Vérifier que l'élection existe
-        const election = await prisma.election.findUnique({
-            where: { id: parseInt(electionId) }
-        });
-
-        if (!election) {
-            return res.status(400).json({
-                success: false,
-                message: 'Élection inexistante'
-            });
-        }
-
-        // Vérifier que l'utilisateur n'est pas déjà candidat à cette élection
-        const existingCandidate = await prisma.candidate.findFirst({
-            where: { userId, electionId: parseInt(electionId) }
-        });
-
-        if (existingCandidate) {
-            return res.status(400).json({
-                success: false,
-                message: 'Vous êtes déjà candidat à cette élection.'
-            });
-        }
-
-        // Utiliser le nom et prénom de l'étudiant
-        const nom = user.etudiant?.nom || user.nom || 'Inconnu';
-        const prenom = user.etudiant?.prenom || user.prenom || 'Inconnu';
-
-        // Créer la candidature
-        const candidate = await prisma.candidate.create({
-            data: {
-                nom,
-                prenom,
-                slogan,
-                programme,
-                motivation,
-                photoUrl: photo,
-                userId,
-                electionId: parseInt(electionId),
-                statut: 'en_attente'
-            }
-        });
-
-        res.status(201).json({
-            success: true,
-            message: 'Candidature déposée avec succès',
-            candidate
-        });
-
-    } catch (error) {
-        console.error('Erreur création candidature:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Erreur serveur lors de la création de la candidature'
-        });
-    }
-}); */
-
-// Déposer une candidature à une élection 
 router.post('/', authenticateToken, async (req, res) => {
     try {
         const { electionId, slogan, photo, programme, motivation } = req.body;
@@ -301,15 +214,9 @@ router.post('/', authenticateToken, async (req, res) => {
         console.log('=== DÉBUT CANDIDATURE ===');
         console.log('User ID:', userId);
         console.log('Election ID:', electionId);
-        console.log('Slogan:', slogan);
-        console.log('Photo:', photo);
-        console.log('Programme length:', programme ? programme.length : 0);
-        console.log('Motivation length:', motivation ? motivation.length : 0);
-        console.log('Body complet:', req.body);
 
         // Validation des champs requis
         if (!userId || !electionId || !slogan || !photo || !programme || !motivation) {
-            console.log('❌ Champs manquants');
             return res.status(400).json({
                 success: false,
                 message: 'Tous les champs sont requis: electionId, slogan, photo, programme, motivation'
@@ -323,13 +230,11 @@ router.post('/', authenticateToken, async (req, res) => {
         });
 
         if (!user) {
-            console.log('❌ Utilisateur non trouvé');
             return res.status(400).json({
                 success: false,
                 message: 'Utilisateur inexistant'
             });
         }
-        console.log('✅ Utilisateur trouvé:', user.email);
 
         // Vérifier que l'élection existe
         const election = await prisma.election.findUnique({
@@ -337,13 +242,11 @@ router.post('/', authenticateToken, async (req, res) => {
         });
 
         if (!election) {
-            console.log('❌ Élection non trouvée');
             return res.status(400).json({
                 success: false,
                 message: 'Élection inexistante'
             });
         }
-        console.log('✅ Élection trouvée:', election.titre);
 
         // Vérifier que l'utilisateur n'est pas déjà candidat à cette élection
         const existingCandidate = await prisma.candidate.findFirst({
@@ -351,19 +254,53 @@ router.post('/', authenticateToken, async (req, res) => {
         });
 
         if (existingCandidate) {
-            console.log('❌ Candidature déjà existante');
             return res.status(400).json({
                 success: false,
                 message: 'Vous êtes déjà candidat à cette élection.'
             });
         }
-        console.log('✅ Aucune candidature existante');
 
-        // Utiliser le nom et prénom de l'étudiant
-        const nom = user.etudiant?.nom || user.nom || 'Inconnu';
-        const prenom = user.etudiant?.prenom || user.prenom || 'Inconnu';
+        // RÉSOLUTION DU PROBLÈME : Validation des champs nom et prenom
+        let nom = user.etudiant?.nom;
+        let prenom = user.etudiant?.prenom;
 
-        console.log('📝 Nom/Prenom à utiliser:', nom, prenom);
+        // Si les champs sont manquants dans etudiant, utilisez des valeurs par défaut valides
+        if (!nom || nom.trim().length === 0) {
+            nom = 'Candidat';
+            console.log('⚠️ Nom manquant, utilisation de valeur par défaut');
+        }
+
+        if (!prenom || prenom.trim().length === 0) {
+            prenom = 'Étudiant';
+            console.log('⚠️ Prénom manquant, utilisation de valeur par défaut');
+        }
+
+        // Valider les longueurs maximales
+        if (nom.length > 100) {
+            nom = nom.substring(0, 100);
+            console.log('⚠️ Nom tronqué à 100 caractères');
+        }
+
+        if (prenom.length > 100) {
+            prenom = prenom.substring(0, 100);
+            console.log('⚠️ Prénom tronqué à 100 caractères');
+        }
+
+        if (slogan.length > 200) {
+            return res.status(400).json({
+                success: false,
+                message: 'Le slogan ne doit pas dépasser 200 caractères'
+            });
+        }
+
+        if (photo.length > 500) {
+            return res.status(400).json({
+                success: false,
+                message: 'L\'URL de la photo est trop longue'
+            });
+        }
+
+        console.log('📝 Données finales:', { nom, prenom, slogan: slogan.length, photo: photo.length });
 
         // Créer la candidature
         const candidate = await prisma.candidate.create({
@@ -376,12 +313,11 @@ router.post('/', authenticateToken, async (req, res) => {
                 photoUrl: photo,
                 userId,
                 electionId: parseInt(electionId),
-                statut: 'en_attente'
+                statut: 'EN_ATTENTE'
             }
         });
 
         console.log('✅ Candidature créée avec succès:', candidate.id);
-        console.log('=== FIN CANDIDATURE ===');
 
         res.status(201).json({
             success: true,
@@ -391,11 +327,23 @@ router.post('/', authenticateToken, async (req, res) => {
 
     } catch (error) {
         console.error('❌ Erreur création candidature:', error);
-        console.error('Stack:', error.stack);
+
+        // Log détaillé pour Prisma
+        if (error.code === 'P2002') {
+            console.error('❌ Violation de contrainte unique');
+        }
+        if (error.meta) {
+            console.error('❌ Meta erreur:', error.meta);
+        }
+
         res.status(500).json({
             success: false,
             message: 'Erreur serveur lors de la création de la candidature',
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+            error: process.env.NODE_ENV === 'development' ? {
+                message: error.message,
+                code: error.code,
+                meta: error.meta
+            } : undefined
         });
     }
 });
