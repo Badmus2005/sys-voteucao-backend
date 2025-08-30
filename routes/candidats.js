@@ -51,6 +51,101 @@ router.post('/', authenticateToken, async (req, res) => {
     }
 });
 
+// Récupérer tous les candidats d'une élection spécifique
+router.get('/election/:electionId', authenticateToken, async (req, res) => {
+    try {
+        const { electionId } = req.params;
+
+        // Vérifier que l'élection existe
+        const election = await prisma.election.findUnique({
+            where: { id: parseInt(electionId) }
+        });
+
+        if (!election) {
+            return res.status(404).json({
+                message: 'Élection non trouvée'
+            });
+        }
+
+        // Récupérer les candidats avec leurs informations utilisateur
+        const candidates = await prisma.candidate.findMany({
+            where: {
+                electionId: parseInt(electionId)
+            },
+            include: {
+                user: {
+                    include: {
+                        etudiant: {
+                            select: {
+                                nom: true,
+                                prenom: true,
+                                filiere: true,
+                                annee: true,
+                                ecole: true,
+                                photoUrl: true
+                            }
+                        }
+                    }
+                },
+                election: {
+                    select: {
+                        titre: true,
+                        type: true
+                    }
+                },
+                _count: {
+                    select: {
+                        votes: true
+                    }
+                }
+            },
+            orderBy: {
+                createdAt: 'desc'
+            }
+        });
+
+        // Formater la réponse
+        const formattedCandidates = candidates.map(candidate => ({
+            id: candidate.id,
+            nom: candidate.nom,
+            prenom: candidate.prenom,
+            program: candidate.program,
+            photoUrl: candidate.photoUrl || candidate.user.etudiant?.photoUrl,
+            userId: candidate.userId,
+            electionId: candidate.electionId,
+            createdAt: candidate.createdAt,
+            userDetails: candidate.user.etudiant ? {
+                filiere: candidate.user.etudiant.filiere,
+                annee: candidate.user.etudiant.annee,
+                ecole: candidate.user.etudiant.ecole
+            } : null,
+            electionDetails: {
+                titre: candidate.election.titre,
+                type: candidate.election.type
+            },
+            votesCount: candidate._count.votes
+        }));
+
+        res.json({
+            success: true,
+            election: {
+                id: election.id,
+                titre: election.titre,
+                type: election.type
+            },
+            candidates: formattedCandidates,
+            totalCandidates: candidates.length
+        });
+
+    } catch (error) {
+        console.error('Erreur récupération candidats:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Erreur serveur lors de la récupération des candidats'
+        });
+    }
+});
+
 // GET /api/candidats/:id - Récupérer un candidat spécifique
 router.get('/:id', async (req, res) => {
     try {
@@ -149,7 +244,7 @@ router.put('/:candidateId/programme', authenticateToken, async (req, res) => {
 });
 
 
-// GET /api/candidats - Liste des candidats (avec filtre optionnel par electionId)
+// GET /api/candidats - Liste des candidats 
 router.get('/', async (req, res) => {
     try {
         const { electionId, page = 1, limit = 10 } = req.query;
