@@ -203,7 +203,7 @@ router.get('/:id', async (req, res) => {
     }
 });
 
-// Récupérer les élections spécifiques à l'étudiant connecté
+// 
 router.get('/student', async (req, res) => {
     try {
         if (!req.user || !req.user.id) {
@@ -214,9 +214,7 @@ router.get('/student', async (req, res) => {
 
         const user = await prisma.user.findUnique({
             where: { id: userId },
-            include: {
-                etudiant: true
-            }
+            include: { etudiant: true }
         });
 
         if (!user || !user.etudiant) {
@@ -230,19 +228,19 @@ router.get('/student', async (req, res) => {
                 AND: [
                     {
                         OR: [
-                            { ecole: null },
+                            { ecole: { equals: null } },
                             { ecole: ecole }
                         ]
                     },
                     {
                         OR: [
-                            { filiere: null },
+                            { filiere: { equals: null } },
                             { filiere: filiere }
                         ]
                     },
                     {
                         OR: [
-                            { annee: null },
+                            { annee: { equals: null } },
                             { annee: annee }
                         ]
                     }
@@ -251,11 +249,7 @@ router.get('/student', async (req, res) => {
             include: {
                 candidates: {
                     include: {
-                        user: {
-                            include: {
-                                etudiant: true
-                            }
-                        }
+                        user: { include: { etudiant: true } }
                     }
                 }
             }
@@ -264,9 +258,10 @@ router.get('/student', async (req, res) => {
         res.json(elections);
     } catch (error) {
         console.error("Erreur interne dans /student:", error);
-        res.status(500).json({ message: 'Erreur serveur' });
+        res.status(500).json({ message: 'Erreur serveur', error: error.message });
     }
 });
+
 
 
 // Créer une nouvelle élection (admin seulement)
