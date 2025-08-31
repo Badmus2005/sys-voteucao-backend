@@ -203,6 +203,62 @@ router.get('/:id', async (req, res) => {
     }
 });
 
+// Récupérer les élections spécifiques à l'étudiant connecté
+router.get('/student', auth, async (req, res) => {
+    try {
+        // Récupérer l'utilisateur connecté
+        const userId = req.user.id;
+
+        // Récupérer le profil étudiant complet
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            include: {
+                etudiant: true
+            }
+        });
+
+        if (!user || !user.etudiant) {
+            return res.status(404).json({ message: 'Profil étudiant non trouvé' });
+        }
+
+        const { ecole, filiere, annee } = user.etudiant;
+
+        // Récupérer les élections qui correspondent au profil de l'étudiant
+        const elections = await prisma.election.findMany({
+            where: {
+                OR: [
+                    { ecole: null }, // Élections ouvertes à toutes les écoles
+                    { ecole: ecole } // Élections spécifiques à son école
+                ],
+                OR: [
+                    { filiere: null }, // Élections ouvertes à toutes les filières
+                    { filiere: filiere } // Élections spécifiques à sa filière
+                ],
+                OR: [
+                    { annee: null }, // Élections ouvertes à toutes les années
+                    { annee: annee } // Élections spécifiques à son année
+                ]
+            },
+            include: {
+                candidates: {
+                    include: {
+                        user: {
+                            include: {
+                                etudiant: true
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        res.json(elections);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Erreur serveur' });
+    }
+});
+
 // Créer une nouvelle élection (admin seulement)
 router.post('/', authenticateToken, async (req, res) => {
     try {
