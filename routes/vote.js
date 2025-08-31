@@ -171,7 +171,7 @@ async function calculateVoteWeight(userId, election) {
     }
 }
 
-// Récupérer les résultats d'une élection (AVEC PONDÉRATION)
+// Récupérer les résultats d'une élection 
 router.get('/results/:electionId', async (req, res) => {
     try {
         const { electionId } = req.params;

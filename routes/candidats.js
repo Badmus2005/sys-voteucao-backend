@@ -166,6 +166,68 @@ router.get('/is-candidate/:electionId', authenticateToken, async (req, res) => {
     }
 });
 
+// GET /api/candidats/mes-candidatures - Récupérer les candidatures de l'étudiant connecté
+router.get('/mes-candidatures', authenticateToken, async (req, res) => {
+    try {
+        const userId = req.user.id;
+
+        // Récupérer les candidatures de l'utilisateur
+        const candidatures = await prisma.candidate.findMany({
+            where: {
+                userId: userId
+            },
+            include: {
+                election: {
+                    select: {
+                        id: true,
+                        titre: true,
+                        type: true,
+                        description: true,
+                        dateDebut: true,
+                        dateFin: true
+                    }
+                },
+                _count: {
+                    select: {
+                        votes: true
+                    }
+                }
+            },
+            orderBy: {
+                createdAt: 'desc'
+            }
+        });
+
+        // Formater la réponse
+        const formattedCandidatures = candidatures.map(candidature => ({
+            id: candidature.id,
+            nom: candidature.nom,
+            prenom: candidature.prenom,
+            slogan: candidature.slogan,
+            programme: candidature.programme,
+            motivation: candidature.motivation,
+            photoUrl: candidature.photoUrl,
+            statut: candidature.statut,
+            createdAt: candidature.createdAt,
+            updatedAt: candidature.updatedAt,
+            election: candidature.election,
+            votesCount: candidature._count.votes
+        }));
+
+        res.json({
+            success: true,
+            candidatures: formattedCandidatures,
+            total: candidatures.length
+        });
+
+    } catch (error) {
+        console.error('Erreur récupération candidatures:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Erreur serveur lors de la récupération des candidatures'
+        });
+    }
+});
 
 // GET /api/candidats/:id - Récupérer un candidat spécifique
 router.get('/:id', async (req, res) => {
