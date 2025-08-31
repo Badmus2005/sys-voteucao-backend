@@ -5,7 +5,7 @@ import VoteToken from '../models/VoteToken.js';
 
 const router = express.Router();
 
-// Récupérer toutes les élections (pas seulement les actives)
+// Récupérer toutes les élections 
 router.get('/', async (req, res) => {
     try {
         const { status } = req.query;
