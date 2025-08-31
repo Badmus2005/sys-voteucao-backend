@@ -204,7 +204,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // Récupérer les élections spécifiques à l'étudiant connecté
-router.get('/student', authenticateToken, async (req, res) => {
+router.get('/student', async (req, res) => {
     try {
         // Récupérer l'utilisateur connecté
         const userId = req.user.id;
