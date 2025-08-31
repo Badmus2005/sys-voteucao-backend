@@ -206,10 +206,12 @@ router.get('/:id', async (req, res) => {
 // Récupérer les élections spécifiques à l'étudiant connecté
 router.get('/student', async (req, res) => {
     try {
-        // Récupérer l'utilisateur connecté
+        if (!req.user || !req.user.id) {
+            return res.status(401).json({ message: "Utilisateur non authentifié" });
+        }
+
         const userId = req.user.id;
 
-        // Récupérer le profil étudiant complet
         const user = await prisma.user.findUnique({
             where: { id: userId },
             include: {
@@ -223,20 +225,27 @@ router.get('/student', async (req, res) => {
 
         const { ecole, filiere, annee } = user.etudiant;
 
-        // Récupérer les élections qui correspondent au profil de l'étudiant
         const elections = await prisma.election.findMany({
             where: {
-                OR: [
-                    { ecole: null }, // Élections ouvertes à toutes les écoles
-                    { ecole: ecole } // Élections spécifiques à son école
-                ],
-                OR: [
-                    { filiere: null }, // Élections ouvertes à toutes les filières
-                    { filiere: filiere } // Élections spécifiques à sa filière
-                ],
-                OR: [
-                    { annee: null }, // Élections ouvertes à toutes les années
-                    { annee: annee } // Élections spécifiques à son année
+                AND: [
+                    {
+                        OR: [
+                            { ecole: null },
+                            { ecole: ecole }
+                        ]
+                    },
+                    {
+                        OR: [
+                            { filiere: null },
+                            { filiere: filiere }
+                        ]
+                    },
+                    {
+                        OR: [
+                            { annee: null },
+                            { annee: annee }
+                        ]
+                    }
                 ]
             },
             include: {
@@ -254,10 +263,11 @@ router.get('/student', async (req, res) => {
 
         res.json(elections);
     } catch (error) {
-        console.error(error);
+        console.error("Erreur interne dans /student:", error);
         res.status(500).json({ message: 'Erreur serveur' });
     }
 });
+
 
 // Créer une nouvelle élection (admin seulement)
 router.post('/', authenticateToken, async (req, res) => {
