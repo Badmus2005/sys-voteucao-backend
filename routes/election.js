@@ -229,9 +229,10 @@ router.get('/student', async (req, res) => {
 
         const { ecole, filiere, annee } = user.etudiant;
 
-        // Construire les conditions de filtrage
+        // Construire les conditions de filtrage dynamiquement
         const whereConditions = [];
 
+        // Conditions pour l'école
         if (ecole) {
             whereConditions.push({
                 OR: [
@@ -239,8 +240,12 @@ router.get('/student', async (req, res) => {
                     { ecole: ecole }
                 ]
             });
+        } else {
+            // Si l'école n'est pas définie, seulement les élections sans école spécifique
+            whereConditions.push({ ecole: null });
         }
 
+        // Conditions pour la filière
         if (filiere) {
             whereConditions.push({
                 OR: [
@@ -248,8 +253,11 @@ router.get('/student', async (req, res) => {
                     { filiere: filiere }
                 ]
             });
+        } else {
+            whereConditions.push({ filiere: null });
         }
 
+        // Conditions pour l'année
         if (annee) {
             whereConditions.push({
                 OR: [
@@ -257,14 +265,17 @@ router.get('/student', async (req, res) => {
                     { annee: annee }
                 ]
             });
+        } else {
+            whereConditions.push({ annee: null });
         }
 
-        const whereClause = whereConditions.length > 0 ? { AND: whereConditions } : {};
+        // Ajouter la condition que l'élection est active
+        whereConditions.push({ isActive: true });
 
-        // Récupérer les élections sans les relations problématiques d'abord
         const elections = await prisma.election.findMany({
-            where: whereClause,
-            // Retirer l'inclusion complexe pour tester d'abord
+            where: {
+                AND: whereConditions
+            },
             select: {
                 id: true,
                 type: true,
@@ -280,41 +291,14 @@ router.get('/student', async (req, res) => {
                 niveau: true,
                 delegueType: true,
                 isActive: true,
-                createdAt: true,
-                _count: {
-                    select: {
-                        candidates: true,
-                        votes: true
-                    }
-                }
+                createdAt: true
+            },
+            orderBy: {
+                createdAt: 'desc'
             }
         });
 
-        // Si vous avez besoin des candidats, faites une requête séparée
-        const electionsWithCandidates = await Promise.all(
-            elections.map(async (election) => {
-                const candidates = await prisma.candidate.findMany({
-                    where: { electionId: election.id },
-                    select: {
-                        id: true,
-                        nom: true,
-                        prenom: true,
-                        slogan: true,
-                        statut: true,
-                        userId: true,
-                        electionId: true,
-                        photoUrl: true
-                    }
-                });
-
-                return {
-                    ...election,
-                    candidates
-                };
-            })
-        );
-
-        res.json(electionsWithCandidates);
+        res.json(elections);
     } catch (error) {
         console.error("Erreur interne dans /student:", error);
         res.status(500).json({
