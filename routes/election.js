@@ -292,7 +292,6 @@ router.get('/:id', async (req, res) => {
 router.get('/my-elections', authenticateToken, async (req, res) => {
     try {
         const userId = req.user.id;
-        console.log('User ID:', userId); // Debug
 
         // Récupérer les informations de l'étudiant
         const userWithStudent = await prisma.user.findUnique({
@@ -307,35 +306,16 @@ router.get('/my-elections', authenticateToken, async (req, res) => {
         }
 
         const etudiant = userWithStudent.etudiant;
-        console.log('Étudiant:', etudiant); // Debug
 
-        // VERSION CORRIGÉE - Utilisez select au lieu de include pour _count
+        // VERSION CORRIGÉE - Utilisez une approche différente
         const elections = await prisma.election.findMany({
             where: {
                 isActive: true,
                 dateDebut: { lte: new Date() },
                 dateFin: { gte: new Date() }
             },
-            select: {
-                id: true,
-                titre: true,
-                description: true,
-                type: true,
-                filiere: true,
-                annee: true,
-                ecole: true,
-                dateDebut: true,
-                dateFin: true,
-                isActive: true,
+            include: {
                 candidates: {
-                    select: {
-                        id: true
-                    }
-                },
-                votes: {
-                    where: {
-                        userId: userId
-                    },
                     select: {
                         id: true
                     }
@@ -343,19 +323,26 @@ router.get('/my-elections', authenticateToken, async (req, res) => {
             }
         });
 
-        console.log('Élections trouvées:', elections.length); // Debug
+        // Pour chaque élection, vérifier si l'utilisateur a déjà voté
+        const electionsWithVoteStatus = await Promise.all(
+            elections.map(async (election) => {
+                const vote = await prisma.vote.findFirst({
+                    where: {
+                        userId: userId,
+                        electionId: election.id
+                    }
+                });
 
-        // Transformer les résultats
-        const electionsWithCount = elections.map(election => ({
-            ...election,
-            _count: {
-                candidates: election.candidates.length,
-                votes: election.votes.length
-            }
-        }));
+                return {
+                    ...election,
+                    hasVoted: !!vote,
+                    candidatesCount: election.candidates.length
+                };
+            })
+        );
 
         // Filtrer les élections accessibles
-        const accessibleElections = electionsWithCount.filter(election =>
+        const accessibleElections = electionsWithVoteStatus.filter(election =>
             isEligibleForElection(etudiant, election)
         ).map(election => ({
             id: election.id,
@@ -364,18 +351,17 @@ router.get('/my-elections', authenticateToken, async (req, res) => {
             type: election.type,
             dateDebut: election.dateDebut,
             dateFin: election.dateFin,
-            hasVoted: election._count.votes > 0,
-            candidatesCount: election._count.candidates
+            hasVoted: election.hasVoted,
+            candidatesCount: election.candidatesCount
         }));
 
-        console.log('Élections accessibles:', accessibleElections.length); // Debug
         res.json(accessibleElections);
 
     } catch (error) {
         console.error('Erreur détaillée my-elections:', error);
         res.status(500).json({
             message: 'Erreur serveur interne',
-            error: error.message // Inclure le message d'erreur pour le debug
+            error: error.message
         });
     }
 });
