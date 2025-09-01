@@ -287,47 +287,29 @@ router.get('/:id', async (req, res) => {
     }
 });
 
+
 // Récupérer les élections où l'utilisateur peut voter
 router.get('/my-elections', authenticateToken, async (req, res) => {
     try {
         const userId = req.user.id;
-        console.log('User ID:', userId);
-        // Vérification plus robuste de l'utilisateur
+        console.log('User ID:', userId); // Debug
+
+        // Récupérer les informations de l'étudiant
         const userWithStudent = await prisma.user.findUnique({
             where: { id: userId },
             include: {
-                etudiant: {
-                    include: {
-                        filiere: true, // Si c'est une relation
-                        ecole: true    // Si c'est une relation
-                    }
-                }
+                etudiant: true
             }
         });
 
-        if (!userWithStudent) {
-            return res.status(404).json({ message: 'Utilisateur non trouvé' });
+        if (!userWithStudent || !userWithStudent.etudiant) {
+            return res.status(403).json({ message: 'Profil étudiant incomplet' });
         }
-
-        if (!userWithStudent.etudiant) {
-            return res.status(403).json({
-                message: 'Profil étudiant incomplet ou non configuré'
-            });
-        }
-
-        console.log('Étudiant trouvé:', etudiant);
 
         const etudiant = userWithStudent.etudiant;
+        console.log('Étudiant:', etudiant); // Debug
 
-        // Vérifier que les champs requis existent
-        if (!etudiant.filiere || !etudiant.annee || !etudiant.ecole) {
-            return res.status(403).json({
-                message: 'Profil étudiant incomplet. Filière, année ou école manquante'
-            });
-        }
-
-
-        // Récupérer toutes les élections actives
+        // VERSION CORRIGÉE - Utilisez select au lieu de include pour _count
         const elections = await prisma.election.findMany({
             where: {
                 isActive: true,
@@ -361,7 +343,9 @@ router.get('/my-elections', authenticateToken, async (req, res) => {
             }
         });
 
-        // Transformer les résultats pour avoir le même format
+        console.log('Élections trouvées:', elections.length); // Debug
+
+        // Transformer les résultats
         const electionsWithCount = elections.map(election => ({
             ...election,
             _count: {
@@ -370,40 +354,52 @@ router.get('/my-elections', authenticateToken, async (req, res) => {
             }
         }));
 
-        console.log('Élections trouvées:', elections.length);
-
-        // Utiliser electionsWithCount au lieu de elections
+        // Filtrer les élections accessibles
         const accessibleElections = electionsWithCount.filter(election =>
             isEligibleForElection(etudiant, election)
         ).map(election => ({
-            ...election,
+            id: election.id,
+            titre: election.titre,
+            description: election.description,
+            type: election.type,
+            dateDebut: election.dateDebut,
+            dateFin: election.dateFin,
             hasVoted: election._count.votes > 0,
             candidatesCount: election._count.candidates
         }));
 
+        console.log('Élections accessibles:', accessibleElections.length); // Debug
         res.json(accessibleElections);
 
     } catch (error) {
-        console.error('Erreur détaillée:', error);
+        console.error('Erreur détaillée my-elections:', error);
         res.status(500).json({
             message: 'Erreur serveur interne',
-            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+            error: error.message // Inclure le message d'erreur pour le debug
         });
     }
 });
 
 // FONCTION: Vérifier l'éligibilité
 function isEligibleForElection(etudiant, election) {
-    if (!etudiant.filiere || !etudiant.annee || !etudiant.ecole) {
-        return false;
-    }
+    // Vérifications de sécurité
+    if (!etudiant || !election) return false;
+    if (!etudiant.filiere || !etudiant.annee || !etudiant.ecole) return false;
+
+    // Conversions en string pour éviter les problèmes de type
+    const etudiantFiliere = String(etudiant.filiere || '');
+    const etudiantAnnee = String(etudiant.annee || '');
+    const etudiantEcole = String(etudiant.ecole || '');
+    const electionFiliere = String(election.filiere || '');
+    const electionAnnee = String(election.annee || '');
+    const electionEcole = String(election.ecole || '');
 
     if (election.type === 'SALLE') {
-        return etudiant.filiere === election.filiere &&
-            etudiant.annee === election.annee &&
-            etudiant.ecole === election.ecole;
+        return etudiantFiliere === electionFiliere &&
+            etudiantAnnee === electionAnnee &&
+            etudiantEcole === electionEcole;
     } else if (election.type === 'ECOLE') {
-        return etudiant.ecole === election.ecole;
+        return etudiantEcole === electionEcole;
     } else if (election.type === 'UNIVERSITE') {
         return true;
     }
