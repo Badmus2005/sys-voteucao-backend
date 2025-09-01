@@ -334,33 +334,51 @@ router.get('/my-elections', authenticateToken, async (req, res) => {
                 dateDebut: { lte: new Date() },
                 dateFin: { gte: new Date() }
             },
-            include: {
-                _count: {
+            select: {
+                id: true,
+                titre: true,
+                description: true,
+                type: true,
+                filiere: true,
+                annee: true,
+                ecole: true,
+                dateDebut: true,
+                dateFin: true,
+                isActive: true,
+                candidates: {
                     select: {
-                        candidates: true,
-                        votes: {
-                            where: { userId: userId } // Assurez-vous que userId est bien passé
-                        }
+                        id: true
+                    }
+                },
+                votes: {
+                    where: {
+                        userId: userId
+                    },
+                    select: {
+                        id: true
                     }
                 }
             }
         });
 
+        // Transformer les résultats pour avoir le même format
+        const electionsWithCount = elections.map(election => ({
+            ...election,
+            _count: {
+                candidates: election.candidates.length,
+                votes: election.votes.length
+            }
+        }));
+
         console.log('Élections trouvées:', elections.length);
 
-        // Filtrer les élections accessibles
-        const accessibleElections = elections.filter(election =>
+        // Utiliser electionsWithCount au lieu de elections
+        const accessibleElections = electionsWithCount.filter(election =>
             isEligibleForElection(etudiant, election)
         ).map(election => ({
-            id: election.id,
-            titre: election.titre,
-            description: election.description,
-            type: election.type,
-            dateDebut: election.dateDebut,
-            dateFin: election.dateFin,
+            ...election,
             hasVoted: election._count.votes > 0,
-            candidatesCount: election._count.candidates,
-            // Ajouter d'autres champs nécessaires
+            candidatesCount: election._count.candidates
         }));
 
         res.json(accessibleElections);
