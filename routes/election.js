@@ -203,7 +203,6 @@ router.get('/:id', async (req, res) => {
     }
 });
 
-// 
 router.get('/student', async (req, res) => {
     try {
         if (!req.user || !req.user.id) {
@@ -212,44 +211,68 @@ router.get('/student', async (req, res) => {
 
         const userId = req.user.id;
 
+        // Récupérer l'utilisateur avec son profil étudiant
         const user = await prisma.user.findUnique({
             where: { id: userId },
-            include: { etudiant: true }
+            include: {
+                etudiant: true
+            }
         });
 
-        if (!user || !user.etudiant) {
+        if (!user) {
+            return res.status(404).json({ message: 'Utilisateur non trouvé' });
+        }
+
+        if (!user.etudiant) {
             return res.status(404).json({ message: 'Profil étudiant non trouvé' });
         }
 
         const { ecole, filiere, annee } = user.etudiant;
 
-        const elections = await prisma.election.findMany({
-            where: {
-                AND: [
-                    {
-                        OR: [
-                            { ecole: { equals: null } },
-                            { ecole: ecole }
-                        ]
-                    },
-                    {
-                        OR: [
-                            { filiere: { equals: null } },
-                            { filiere: filiere }
-                        ]
-                    },
-                    {
-                        OR: [
-                            { annee: { equals: null } },
-                            { annee: annee }
-                        ]
-                    }
+        // Construire les conditions de filtrage dynamiquement
+        const whereConditions = [];
+
+        // Ajouter les conditions seulement si les valeurs existent
+        if (ecole) {
+            whereConditions.push({
+                OR: [
+                    { ecole: null },
+                    { ecole: ecole }
                 ]
-            },
+            });
+        }
+
+        if (filiere) {
+            whereConditions.push({
+                OR: [
+                    { filiere: null },
+                    { filiere: filiere }
+                ]
+            });
+        }
+
+        if (annee) {
+            whereConditions.push({
+                OR: [
+                    { annee: null },
+                    { annee: annee }
+                ]
+            });
+        }
+
+        // Si aucune condition n'est applicable, retourner toutes les élections
+        const whereClause = whereConditions.length > 0 ? { AND: whereConditions } : {};
+
+        const elections = await prisma.election.findMany({
+            where: whereClause,
             include: {
                 candidates: {
                     include: {
-                        user: { include: { etudiant: true } }
+                        user: {
+                            include: {
+                                etudiant: true
+                            }
+                        }
                     }
                 }
             }
@@ -258,10 +281,13 @@ router.get('/student', async (req, res) => {
         res.json(elections);
     } catch (error) {
         console.error("Erreur interne dans /student:", error);
-        res.status(500).json({ message: 'Erreur serveur', error: error.message });
+        res.status(500).json({
+            message: 'Erreur serveur',
+            error: error.message,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
     }
 });
-
 
 
 // Créer une nouvelle élection (admin seulement)
