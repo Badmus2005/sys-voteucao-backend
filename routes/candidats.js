@@ -412,11 +412,11 @@ router.post('/', authenticateToken, async (req, res) => {
 
 
 
-router.put('/candidats/:id', auth, async (req, res) => {
+router.put('/candidats/:id', authenticateToken, async (req, res) => {
     // Logique de modification
 });
 
-router.delete('/candidats/:id', auth, async (req, res) => {
+router.delete('/candidats/:id', authenticateToken, async (req, res) => {
     // Logique de suppression
 });
 
