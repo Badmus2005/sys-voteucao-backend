@@ -287,13 +287,18 @@ router.get('/:id', async (req, res) => {
     }
 });
 
+// Récupérer les élections où l'utilisateur peut voter
 router.get('/my-elections', authenticateToken, async (req, res) => {
     try {
         const userId = req.user.id;
+        console.log('User ID:', userId);
 
+        // Récupérer les informations de l'étudiant
         const userWithStudent = await prisma.user.findUnique({
             where: { id: userId },
-            include: { etudiant: true }
+            include: {
+                etudiant: true
+            }
         });
 
         if (!userWithStudent || !userWithStudent.etudiant) {
@@ -301,38 +306,56 @@ router.get('/my-elections', authenticateToken, async (req, res) => {
         }
 
         const etudiant = userWithStudent.etudiant;
+        console.log('Étudiant:', etudiant);
 
-        // Récupérer toutes les élections avec les votes de l'utilisateur en une requête
+        // Vérifier que les champs requis existent
+        if (!etudiant.filiere || !etudiant.annee || !etudiant.ecole) {
+            return res.status(403).json({
+                message: 'Profil étudiant incomplet. Filière, année ou école manquante'
+            });
+        }
+
+        // Récupérer toutes les élections actives avec une syntaxe simple
         const elections = await prisma.election.findMany({
             where: {
                 isActive: true,
                 dateDebut: { lte: new Date() },
                 dateFin: { gte: new Date() }
-            },
-            include: {
-                candidates: {
-                    select: { id: true }
-                },
-                votes: {
-                    where: { userId: userId },
-                    select: { id: true }
-                }
             }
         });
 
-        const accessibleElections = elections
-            .filter(election => isEligibleForElection(etudiant, election))
-            .map(election => ({
-                id: election.id,
-                titre: election.titre,
-                description: election.description,
-                type: election.type,
-                dateDebut: election.dateDebut,
-                dateFin: election.dateFin,
-                hasVoted: election.votes.length > 0,
-                candidatesCount: election.candidates.length
-            }));
+        console.log('Élections trouvées:', elections.length);
 
+        // Pour chaque élection, vérifier si l'utilisateur a voté
+        const electionsWithVoteStatus = await Promise.all(
+            elections.map(async (election) => {
+                const vote = await prisma.vote.findFirst({
+                    where: {
+                        userId: userId,
+                        electionId: election.id
+                    }
+                });
+
+                const candidatesCount = await prisma.candidate.count({
+                    where: {
+                        electionId: election.id
+                    }
+                });
+
+                return {
+                    ...election,
+                    hasVoted: !!vote,
+                    candidatesCount: candidatesCount
+                };
+            })
+        );
+
+        // Filtrer les élections accessibles
+        const accessibleElections = electionsWithVoteStatus.filter(election =>
+            isEligibleForElection(etudiant, election)
+        );
+
+        console.log('Élections accessibles:', accessibleElections.length);
         res.json(accessibleElections);
 
     } catch (error) {
@@ -344,13 +367,11 @@ router.get('/my-elections', authenticateToken, async (req, res) => {
     }
 });
 
-// FONCTION: Vérifier l'éligibilité
+// FONCTION: Vérifier l'éligibilité (version robuste)
 function isEligibleForElection(etudiant, election) {
-    // Vérifications de sécurité
     if (!etudiant || !election) return false;
-    if (!etudiant.filiere || !etudiant.annee || !etudiant.ecole) return false;
 
-    // Conversions en string pour éviter les problèmes de type
+    // Convertir en string pour éviter les problèmes de type
     const etudiantFiliere = String(etudiant.filiere || '');
     const etudiantAnnee = String(etudiant.annee || '');
     const etudiantEcole = String(etudiant.ecole || '');
