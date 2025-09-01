@@ -410,6 +410,16 @@ router.post('/', authenticateToken, async (req, res) => {
     }
 });
 
+
+
+router.put('/candidats/:id', auth, async (req, res) => {
+    // Logique de modification
+});
+
+router.delete('/candidats/:id', auth, async (req, res) => {
+    // Logique de suppression
+});
+
 // Mise à jour du programme d'un candidat (propriétaire)
 router.put('/:candidateId/programme', authenticateToken, async (req, res) => {
     try {

@@ -436,77 +436,17 @@ router.get('/status/:electionId', authenticateToken, async (req, res) => {
     }
 });
 
-// Récupérer les élections où l'utilisateur peut voter
-router.get('/my-elections', authenticateToken, async (req, res) => {
+// Backend: créer cet endpoint
+router.get('/vote/my-votes', auth, async (req, res) => {
     try {
-        const userId = req.user.id;
-
-        // Récupérer les informations de l'étudiant
-        const userWithStudent = await prisma.user.findUnique({
-            where: { id: userId },
-            include: {
-                etudiant: true
-            }
-        });
-
-        if (!userWithStudent || !userWithStudent.etudiant) {
-            return res.status(403).json({ message: 'Profil étudiant incomplet' });
-        }
-
-        const etudiant = userWithStudent.etudiant;
-
-        // Récupérer toutes les élections actives
-        const elections = await prisma.election.findMany({
-            where: {
-                isActive: true,
-                dateDebut: { lte: new Date() },
-                dateFin: { gte: new Date() }
-            },
-            include: {
-                _count: {
-                    select: {
-                        candidates: true,
-                        votes: {
-                            where: { userId }
-                        }
-                    }
-                }
-            }
-        });
-
-        // Filtrer les élections accessibles
-        const accessibleElections = elections.filter(election =>
-            isEligibleForElection(etudiant, election)
-        ).map(election => ({
-            ...election,
-            hasVoted: election._count.votes > 0,
-            candidatesCount: election._count.candidates
-        }));
-
-        res.json(accessibleElections);
+        const votes = await votes.find({ userId: req.user.id })
+            .populate('electionId')
+            .populate('candidateId');
+        res.json(votes);
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Erreur serveur' });
+        res.status(500).json({ error: error.message });
     }
 });
-
-// FONCTION: Vérifier l'éligibilité
-function isEligibleForElection(etudiant, election) {
-    if (!etudiant.filiere || !etudiant.annee || !etudiant.ecole) {
-        return false;
-    }
-
-    if (election.type === 'SALLE') {
-        return etudiant.filiere === election.filiere &&
-            etudiant.annee === election.annee &&
-            etudiant.ecole === election.ecole;
-    } else if (election.type === 'ECOLE') {
-        return etudiant.ecole === election.ecole;
-    } else if (election.type === 'UNIVERSITE') {
-        return true;
-    }
-    return false;
-}
 
 // Valider un token de vote 
 router.post('/validate-token', authenticateToken, async (req, res) => {

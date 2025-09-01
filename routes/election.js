@@ -267,110 +267,90 @@ router.get('/:id', async (req, res) => {
     }
 });
 
-// Récupérer les élections spécifiques à l'étudiant connecté
-router.get('/student', async (req, res) => {
+// Récupérer les élections où l'utilisateur peut voter
+router.get('/my-elections', authenticateToken, async (req, res) => {
     try {
-        if (!req.user || !req.user.id) {
-            return res.status(401).json({ message: "Utilisateur non authentifié" });
-        }
-
         const userId = req.user.id;
 
-        // Récupérer l'utilisateur avec son profil étudiant
-        const user = await prisma.user.findUnique({
+        // Récupérer les informations de l'étudiant
+        const userWithStudent = await prisma.user.findUnique({
             where: { id: userId },
             include: {
                 etudiant: true
             }
         });
 
-        if (!user) {
-            return res.status(404).json({ message: 'Utilisateur non trouvé' });
+        if (!userWithStudent || !userWithStudent.etudiant) {
+            return res.status(403).json({ message: 'Profil étudiant incomplet' });
         }
 
-        if (!user.etudiant) {
-            return res.status(404).json({ message: 'Profil étudiant non trouvé' });
-        }
+        const etudiant = userWithStudent.etudiant;
 
-        const { ecole, filiere, annee } = user.etudiant;
-
-        // Construire les conditions de filtrage dynamiquement
-        const whereConditions = [];
-
-        // Conditions pour l'école
-        if (ecole) {
-            whereConditions.push({
-                OR: [
-                    { ecole: null },
-                    { ecole: ecole }
-                ]
-            });
-        } else {
-            // Si l'école n'est pas définie, seulement les élections sans école spécifique
-            whereConditions.push({ ecole: null });
-        }
-
-        // Conditions pour la filière
-        if (filiere) {
-            whereConditions.push({
-                OR: [
-                    { filiere: null },
-                    { filiere: filiere }
-                ]
-            });
-        } else {
-            whereConditions.push({ filiere: null });
-        }
-
-        // Conditions pour l'année
-        if (annee) {
-            whereConditions.push({
-                OR: [
-                    { annee: null },
-                    { annee: annee }
-                ]
-            });
-        } else {
-            whereConditions.push({ annee: null });
-        }
-
-        // Ajouter la condition que l'élection est active
-        whereConditions.push({ isActive: true });
-
+        // Récupérer toutes les élections actives
         const elections = await prisma.election.findMany({
             where: {
-                AND: whereConditions
-            },
-            select: {
-                id: true,
-                type: true,
-                titre: true,
-                description: true,
-                dateDebut: true,
-                dateFin: true,
-                dateDebutCandidature: true,
-                dateFinCandidature: true,
-                filiere: true,
-                annee: true,
-                ecole: true,
-                niveau: true,
-                delegueType: true,
                 isActive: true,
-                createdAt: true
+                dateDebut: { lte: new Date() },
+                dateFin: { gte: new Date() }
             },
-            orderBy: {
-                createdAt: 'desc'
+            include: {
+                _count: {
+                    select: {
+                        candidates: true,
+                        votes: {
+                            where: { userId }
+                        }
+                    }
+                }
             }
         });
 
-        res.json(elections);
+        // Filtrer les élections accessibles
+        const accessibleElections = elections.filter(election =>
+            isEligibleForElection(etudiant, election)
+        ).map(election => ({
+            ...election,
+            hasVoted: election._count.votes > 0,
+            candidatesCount: election._count.candidates
+        }));
+
+        res.json(accessibleElections);
     } catch (error) {
-        console.error("Erreur interne dans /student:", error);
-        res.status(500).json({
-            message: 'Erreur serveur',
-            error: error.message,
-            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-        });
+        console.error(error);
+        res.status(500).json({ message: 'Erreur serveur' });
+    }
+});
+
+// FONCTION: Vérifier l'éligibilité
+function isEligibleForElection(etudiant, election) {
+    if (!etudiant.filiere || !etudiant.annee || !etudiant.ecole) {
+        return false;
+    }
+
+    if (election.type === 'SALLE') {
+        return etudiant.filiere === election.filiere &&
+            etudiant.annee === election.annee &&
+            etudiant.ecole === election.ecole;
+    } else if (election.type === 'ECOLE') {
+        return etudiant.ecole === election.ecole;
+    } else if (election.type === 'UNIVERSITE') {
+        return true;
+    }
+    return false;
+}
+
+// Backend: créer cet endpoint
+router.get('/election/:id/check-eligibility', auth, async (req, res) => {
+    try {
+        const election = await election.findById(req.params.id);
+        const user = req.user;
+
+        // Logique d'éligibilité
+        const isEligible = checkEligibility(user, election);
+
+        res.json({ eligible: isEligible, reason: isEligible ? '' : 'Non éligible' });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
     }
 });
 
