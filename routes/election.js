@@ -340,13 +340,13 @@ function isEligibleForElection(etudiant, election) {
 }
 
 // Backend: créer cet endpoint
-router.get('/election/:id/check-eligibility', auth, async (req, res) => {
+router.get('/election/:id/check-eligibility', authenticateToken, async (req, res) => {
     try {
         const election = await election.findById(req.params.id);
         const user = req.user;
 
         // Logique d'éligibilité
-        const isEligible = checkEligibility(user, election);
+        const isEligible = isEligibleForElection(user, election);
 
         res.json({ eligible: isEligible, reason: isEligible ? '' : 'Non éligible' });
     } catch (error) {
