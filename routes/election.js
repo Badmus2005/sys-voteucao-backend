@@ -291,22 +291,42 @@ router.get('/:id', async (req, res) => {
 router.get('/my-elections', authenticateToken, async (req, res) => {
     try {
         const userId = req.user.id;
-
-        // Récupérer les informations de l'étudiant
+        console.log('User ID:', userId);
+        // Vérification plus robuste de l'utilisateur
         const userWithStudent = await prisma.user.findUnique({
             where: { id: userId },
             include: {
-                etudiant: true
+                etudiant: {
+                    include: {
+                        filiere: true, // Si c'est une relation
+                        ecole: true    // Si c'est une relation
+                    }
+                }
             }
         });
 
-        if (!userWithStudent || !userWithStudent.etudiant) {
-            return res.status(403).json({ message: 'Profil étudiant incomplet' });
+        if (!userWithStudent) {
+            return res.status(404).json({ message: 'Utilisateur non trouvé' });
         }
+
+        if (!userWithStudent.etudiant) {
+            return res.status(403).json({
+                message: 'Profil étudiant incomplet ou non configuré'
+            });
+        }
+
+        console.log('Étudiant trouvé:', etudiant);
 
         const etudiant = userWithStudent.etudiant;
 
-        // Récupérer toutes les élections actives
+        // Vérifier que les champs requis existent
+        if (!etudiant.filiere || !etudiant.annee || !etudiant.ecole) {
+            return res.status(403).json({
+                message: 'Profil étudiant incomplet. Filière, année ou école manquante'
+            });
+        }
+
+        // Récupérer les élections avec une gestion d'erreur
         const elections = await prisma.election.findMany({
             where: {
                 isActive: true,
@@ -325,19 +345,31 @@ router.get('/my-elections', authenticateToken, async (req, res) => {
             }
         });
 
+        console.log('Élections trouvées:', elections.length);
+
         // Filtrer les élections accessibles
         const accessibleElections = elections.filter(election =>
             isEligibleForElection(etudiant, election)
         ).map(election => ({
-            ...election,
+            id: election.id,
+            titre: election.titre,
+            description: election.description,
+            type: election.type,
+            dateDebut: election.dateDebut,
+            dateFin: election.dateFin,
             hasVoted: election._count.votes > 0,
-            candidatesCount: election._count.candidates
+            candidatesCount: election._count.candidates,
+            // Ajouter d'autres champs nécessaires
         }));
 
         res.json(accessibleElections);
+
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: 'Erreur serveur' });
+        console.error('Erreur détaillée:', error);
+        res.status(500).json({
+            message: 'Erreur serveur interne',
+            error: process.env.NODE_ENV === 'development' ? error.message : undefined
+        });
     }
 });
 
@@ -360,7 +392,7 @@ function isEligibleForElection(etudiant, election) {
 }
 
 // Backend: créer cet endpoint
-router.get('/election/:id/check-eligibility', authenticateToken, async (req, res) => {
+/*router.get('/election/:id/check-eligibility', authenticateToken, async (req, res) => {
     try {
         const election = await election.findById(req.params.id);
         const user = req.user;
@@ -372,7 +404,7 @@ router.get('/election/:id/check-eligibility', authenticateToken, async (req, res
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
-});
+});*/
 
 // Route pour récupérer les détails complets des candidats d'une élection
 router.get('/:id/candidates-details', async (req, res) => {
