@@ -287,92 +287,54 @@ router.get('/:id', async (req, res) => {
     }
 });
 
-router.get('/my-elections', authenticateToken, async (req, res) => {
+router.get("/my-elections", authenticateToken, async (req, res) => {
     try {
         const userId = req.user.id;
-        console.log('=== DÉBUT my-elections ===');
-        console.log('User ID:', userId);
 
-        // Récupérer les informations de l'étudiant
-        const userWithStudent = await prisma.user.findUnique({
+        const user = await prisma.user.findUnique({
             where: { id: userId },
-            include: { etudiant: true }
+            include: { etudiant: true },
         });
-        console.log('User avec étudiant:', userWithStudent);
 
-        if (!userWithStudent || !userWithStudent.etudiant) {
-            console.log('Profil étudiant manquant');
-            return res.status(403).json({ message: 'Profil étudiant incomplet' });
+        if (!user || !user.etudiant) {
+            return res.status(404).json([]);
         }
 
-        const etudiant = userWithStudent.etudiant;
-        console.log('Étudiant:', etudiant);
+        const { filiere, annee, ecole } = user.etudiant;
 
-        // Vérifier les champs requis
-        if (!etudiant.filiere || !etudiant.annee || !etudiant.ecole) {
-            console.log('Champs manquants dans étudiant:', {
-                filiere: etudiant.filiere,
-                annee: etudiant.annee,
-                ecole: etudiant.ecole
-            });
-            return res.status(403).json({
-                message: 'Profil étudiant incomplet. Filière, année ou école manquante'
-            });
-        }
-
-        // Récupérer les élections
-        console.log('Recherche des élections actives...');
         const elections = await prisma.election.findMany({
             where: {
                 isActive: true,
-                dateDebut: { lte: new Date() },
-                dateFin: { gte: new Date() }
-            }
+                OR: [
+                    { type: "UNIVERSITE" },
+                    {
+                        AND: [{ type: "ECOLE" }, { ecole: ecole }],
+                    },
+                    {
+                        AND: [
+                            { type: "SALLE" },
+                            { filiere: filiere },
+                            { annee: annee },
+                            { ecole: ecole },
+                        ],
+                    },
+                ],
+            },
+            orderBy: {
+                createdAt: "desc",
+            },
+            include: {
+                candidates: true,
+            },
         });
-        console.log('Élections trouvées:', elections.length);
 
-        // Vérifier les votes
-        console.log('Vérification des votes...');
-        const electionsWithVoteStatus = await Promise.all(
-            elections.map(async (election) => {
-                const vote = await prisma.vote.findFirst({
-                    where: { userId: userId, electionId: election.id }
-                });
-
-                const candidatesCount = await prisma.candidate.count({
-                    where: { electionId: election.id }
-                });
-
-                return {
-                    ...election,
-                    hasVoted: !!vote,
-                    candidatesCount: candidatesCount
-                };
-            })
-        );
-
-        // Filtrer les élections accessibles
-        console.log('Filtrage des élections accessibles...');
-        const accessibleElections = electionsWithVoteStatus.filter(election =>
-            isEligibleForElection(etudiant, election)
-        );
-        console.log('Élections accessibles:', accessibleElections.length);
-
-        console.log('=== FIN my-elections ===');
-        res.json(accessibleElections);
-
+        return res.json(elections); // 👉 Toujours un tableau JSON
     } catch (error) {
-        console.error('=== ERREUR COMPLÈTE my-elections ===');
-        console.error('Message:', error.message);
-        console.error('Stack:', error.stack);
-        console.error('=== FIN ERREUR ===');
-
-        res.status(500).json({
-            message: 'Erreur serveur interne',
-            error: error.message
-        });
+        console.error(error);
+        res.status(500).json({ message: "Erreur serveur" });
     }
 });
+
 
 // FONCTION: Vérifier l'éligibilité (version robuste)
 function isEligibleForElection(etudiant, election) {
