@@ -28,18 +28,37 @@ router.get('/', async (req, res) => {
 
         const elections = await prisma.election.findMany({
             where: whereClause,
-            include: {
+            select: {
+                id: true,
+                type: true,
+                titre: true,
+                description: true,
+                dateDebut: true,
+                dateFin: true,
+                dateDebutCandidature: true,
+                dateFinCandidature: true,
+                filiere: true,
+                annee: true,
+                ecole: true,
+                niveau: true,
+                delegueType: true,
+                isActive: true,
+                createdAt: true,
                 candidates: {
-                    include: {
-                        user: {
-                            include: {
-                                etudiant: true
-                            }
-                        }
+                    select: {
+                        id: true,
+                        nom: true,
+                        prenom: true,
+                        slogan: true,
+                        photoUrl: true,
+                        statut: true
                     }
                 },
                 _count: {
-                    select: { votes: true }
+                    select: {
+                        votes: true,
+                        candidates: true
+                    }
                 }
             },
             orderBy: { dateDebut: 'desc' }
@@ -94,18 +113,38 @@ router.get('/by-type/:type', async (req, res) => {
         const [elections, total] = await Promise.all([
             prisma.election.findMany({
                 where: whereClause,
-                include: {
+                select: {
+                    id: true,
+                    type: true,
+                    titre: true,
+                    description: true,
+                    dateDebut: true,
+                    dateFin: true,
+                    dateDebutCandidature: true,
+                    dateFinCandidature: true,
+                    filiere: true,
+                    annee: true,
+                    ecole: true,
+                    niveau: true,
+                    delegueType: true,
+                    isActive: true,
+                    createdAt: true,
                     candidates: {
-                        include: {
-                            user: {
-                                include: {
-                                    etudiant: true
-                                }
-                            }
+                        select: {
+                            id: true,
+                            nom: true,
+                            prenom: true,
+                            slogan: true,
+                            photoUrl: true,
+                            statut: true
                         }
                     },
                     _count: {
-                        select: { votes: true, candidates: true, voteTokens: true }
+                        select: {
+                            votes: true,
+                            candidates: true,
+                            voteTokens: true
+                        }
                     }
                 },
                 orderBy: { dateDebut: 'desc' },
@@ -163,18 +202,42 @@ router.get('/:id', async (req, res) => {
 
         const election = await prisma.election.findUnique({
             where: { id: parseInt(id) },
-            include: {
+            select: {
+                id: true,
+                type: true,
+                titre: true,
+                description: true,
+                dateDebut: true,
+                dateFin: true,
+                dateDebutCandidature: true,
+                dateFinCandidature: true,
+                filiere: true,
+                annee: true,
+                ecole: true,
+                niveau: true,
+                delegueType: true,
+                isActive: true,
+                createdAt: true,
                 candidates: {
-                    include: {
-                        user: {
-                            include: {
-                                etudiant: true
-                            }
-                        }
+                    select: {
+                        id: true,
+                        nom: true,
+                        prenom: true,
+                        slogan: true,
+                        programme: true,
+                        motivation: true,
+                        photoUrl: true,
+                        statut: true,
+                        userId: true,
+                        createdAt: true
                     }
                 },
                 _count: {
-                    select: { votes: true, voteTokens: true }
+                    select: {
+                        votes: true,
+                        voteTokens: true,
+                        candidates: true
+                    }
                 }
             }
         });
@@ -192,7 +255,8 @@ router.get('/:id', async (req, res) => {
             stats: {
                 totalVotes,
                 totalTokens,
-                participationRate: `${participationRate}%`
+                participationRate: `${participationRate}%`,
+                totalCandidates: election._count.candidates
             }
         };
 
@@ -203,6 +267,7 @@ router.get('/:id', async (req, res) => {
     }
 });
 
+// Récupérer les élections spécifiques à l'étudiant connecté
 router.get('/student', async (req, res) => {
     try {
         if (!req.user || !req.user.id) {
@@ -309,6 +374,35 @@ router.get('/student', async (req, res) => {
     }
 });
 
+// Route pour récupérer les détails complets des candidats d'une élection
+router.get('/:id/candidates-details', async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const candidates = await prisma.candidate.findMany({
+            where: { electionId: parseInt(id) },
+            include: {
+                user: {
+                    include: {
+                        etudiant: {
+                            select: {
+                                matricule: true,
+                                filiere: true,
+                                annee: true,
+                                ecole: true
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        res.json(candidates);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: 'Erreur serveur' });
+    }
+});
 
 // Créer une nouvelle élection (admin seulement)
 router.post('/', authenticateToken, async (req, res) => {
