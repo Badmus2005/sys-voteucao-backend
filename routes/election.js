@@ -287,18 +287,13 @@ router.get('/:id', async (req, res) => {
     }
 });
 
-
-// Récupérer les élections où l'utilisateur peut voter
 router.get('/my-elections', authenticateToken, async (req, res) => {
     try {
         const userId = req.user.id;
 
-        // Récupérer les informations de l'étudiant
         const userWithStudent = await prisma.user.findUnique({
             where: { id: userId },
-            include: {
-                etudiant: true
-            }
+            include: { etudiant: true }
         });
 
         if (!userWithStudent || !userWithStudent.etudiant) {
@@ -307,7 +302,7 @@ router.get('/my-elections', authenticateToken, async (req, res) => {
 
         const etudiant = userWithStudent.etudiant;
 
-        // VERSION CORRIGÉE - Utilisez une approche différente
+        // Récupérer toutes les élections avec les votes de l'utilisateur en une requête
         const elections = await prisma.election.findMany({
             where: {
                 isActive: true,
@@ -316,44 +311,27 @@ router.get('/my-elections', authenticateToken, async (req, res) => {
             },
             include: {
                 candidates: {
-                    select: {
-                        id: true
-                    }
+                    select: { id: true }
+                },
+                votes: {
+                    where: { userId: userId },
+                    select: { id: true }
                 }
             }
         });
 
-        // Pour chaque élection, vérifier si l'utilisateur a déjà voté
-        const electionsWithVoteStatus = await Promise.all(
-            elections.map(async (election) => {
-                const vote = await prisma.vote.findFirst({
-                    where: {
-                        userId: userId,
-                        electionId: election.id
-                    }
-                });
-
-                return {
-                    ...election,
-                    hasVoted: !!vote,
-                    candidatesCount: election.candidates.length
-                };
-            })
-        );
-
-        // Filtrer les élections accessibles
-        const accessibleElections = electionsWithVoteStatus.filter(election =>
-            isEligibleForElection(etudiant, election)
-        ).map(election => ({
-            id: election.id,
-            titre: election.titre,
-            description: election.description,
-            type: election.type,
-            dateDebut: election.dateDebut,
-            dateFin: election.dateFin,
-            hasVoted: election.hasVoted,
-            candidatesCount: election.candidatesCount
-        }));
+        const accessibleElections = elections
+            .filter(election => isEligibleForElection(etudiant, election))
+            .map(election => ({
+                id: election.id,
+                titre: election.titre,
+                description: election.description,
+                type: election.type,
+                dateDebut: election.dateDebut,
+                dateFin: election.dateFin,
+                hasVoted: election.votes.length > 0,
+                candidatesCount: election.candidates.length
+            }));
 
         res.json(accessibleElections);
 
