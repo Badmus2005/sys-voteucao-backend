@@ -291,7 +291,7 @@ router.get('/:id', async (req, res) => {
  * GET /my-elections
  * Retourne la liste des élections disponibles pour l'étudiant connecté
  */
-router.get("/my-elections", authenticateToken, async (req, res) => {
+router.get("/my-elections", async (req, res) => {
     try {
         // 1. Récupérer l'étudiant lié à l'utilisateur connecté
         const etudiant = await prisma.etudiant.findUnique({
