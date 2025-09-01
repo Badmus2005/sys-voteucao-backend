@@ -5,6 +5,26 @@ import VoteToken from '../models/VoteToken.js';
 
 const router = express.Router();
 
+router.get('/active', async (req, res) => {
+    try {
+        const now = new Date();
+        const activeElection = await prisma.election.findFirst({
+            where: {
+                dateFin: { gte: now },
+                dateDebut: { lte: now }
+            },
+            orderBy: { dateDebut: 'asc' }
+        });
+
+        if (!activeElection) return res.status(204).send();
+        res.json({ id: activeElection.id });
+    } catch (error) {
+        console.error('Erreur récupération élection active:', error);
+        res.status(500).json({ message: 'Erreur serveur' });
+    }
+});
+
+
 // Récupérer toutes les élections 
 router.get('/', async (req, res) => {
     try {
