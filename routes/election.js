@@ -326,7 +326,8 @@ router.get('/my-elections', authenticateToken, async (req, res) => {
             });
         }
 
-        // Récupérer les élections avec une gestion d'erreur
+
+        // Récupérer toutes les élections actives
         const elections = await prisma.election.findMany({
             where: {
                 isActive: true,
@@ -338,7 +339,7 @@ router.get('/my-elections', authenticateToken, async (req, res) => {
                     select: {
                         candidates: true,
                         votes: {
-                            where: { userId }
+                            where: { userId: userId } // Assurez-vous que userId est bien passé
                         }
                     }
                 }
