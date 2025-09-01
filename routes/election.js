@@ -287,51 +287,38 @@ router.get('/:id', async (req, res) => {
     }
 });
 
+/**
+ * GET /my-elections
+ * Retourne la liste des élections disponibles pour l'étudiant connecté
+ */
 router.get("/my-elections", authenticateToken, async (req, res) => {
     try {
-        const userId = req.user.id;
-
-        const user = await prisma.user.findUnique({
-            where: { id: userId },
-            include: { etudiant: true },
+        // 1. Récupérer l'étudiant lié à l'utilisateur connecté
+        const etudiant = await prisma.etudiant.findUnique({
+            where: { userId: req.user.id },
         });
 
-        if (!user || !user.etudiant) {
-            return res.status(404).json([]);
+        if (!etudiant) {
+            return res.status(404).json({ message: "Étudiant introuvable" });
         }
 
-        const { filiere, annee, ecole } = user.etudiant;
-
+        // 2. Récupérer les élections correspondantes
         const elections = await prisma.election.findMany({
             where: {
                 isActive: true,
-                OR: [
-                    { type: "UNIVERSITE" },
-                    {
-                        AND: [{ type: "ECOLE" }, { ecole: ecole }],
-                    },
-                    {
-                        AND: [
-                            { type: "SALLE" },
-                            { filiere: filiere },
-                            { annee: annee },
-                            { ecole: ecole },
-                        ],
-                    },
-                ],
+                filiere: etudiant.filiere,
+                annee: etudiant.annee,
+                ecole: etudiant.ecole,
+                dateDebut: { lte: new Date() }, // Election déjà commencée
+                dateFin: { gte: new Date() },   // Election pas encore terminée
             },
-            orderBy: {
-                createdAt: "desc",
-            },
-            include: {
-                candidates: true,
-            },
+            orderBy: { dateDebut: "asc" },
         });
 
-        return res.json(elections); // 👉 Toujours un tableau JSON
+        res.json(elections);
     } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: "Erreur serveur" });
+        console.error("Erreur GET /my-elections:", error);
+        res.status(500).json({ message: "Erreur interne du serveur" });
     }
 });
 
