@@ -287,35 +287,41 @@ router.get('/:id', async (req, res) => {
     }
 });
 
-// Récupérer les élections où l'utilisateur peut voter
 router.get('/my-elections', authenticateToken, async (req, res) => {
     try {
         const userId = req.user.id;
+        console.log('=== DÉBUT my-elections ===');
         console.log('User ID:', userId);
 
         // Récupérer les informations de l'étudiant
         const userWithStudent = await prisma.user.findUnique({
             where: { id: userId },
-            include: {
-                etudiant: true
-            }
+            include: { etudiant: true }
         });
+        console.log('User avec étudiant:', userWithStudent);
 
         if (!userWithStudent || !userWithStudent.etudiant) {
+            console.log('Profil étudiant manquant');
             return res.status(403).json({ message: 'Profil étudiant incomplet' });
         }
 
         const etudiant = userWithStudent.etudiant;
         console.log('Étudiant:', etudiant);
 
-        // Vérifier que les champs requis existent
+        // Vérifier les champs requis
         if (!etudiant.filiere || !etudiant.annee || !etudiant.ecole) {
+            console.log('Champs manquants dans étudiant:', {
+                filiere: etudiant.filiere,
+                annee: etudiant.annee,
+                ecole: etudiant.ecole
+            });
             return res.status(403).json({
                 message: 'Profil étudiant incomplet. Filière, année ou école manquante'
             });
         }
 
-        // Récupérer toutes les élections actives avec une syntaxe simple
+        // Récupérer les élections
+        console.log('Recherche des élections actives...');
         const elections = await prisma.election.findMany({
             where: {
                 isActive: true,
@@ -323,23 +329,18 @@ router.get('/my-elections', authenticateToken, async (req, res) => {
                 dateFin: { gte: new Date() }
             }
         });
-
         console.log('Élections trouvées:', elections.length);
 
-        // Pour chaque élection, vérifier si l'utilisateur a voté
+        // Vérifier les votes
+        console.log('Vérification des votes...');
         const electionsWithVoteStatus = await Promise.all(
             elections.map(async (election) => {
                 const vote = await prisma.vote.findFirst({
-                    where: {
-                        userId: userId,
-                        electionId: election.id
-                    }
+                    where: { userId: userId, electionId: election.id }
                 });
 
                 const candidatesCount = await prisma.candidate.count({
-                    where: {
-                        electionId: election.id
-                    }
+                    where: { electionId: election.id }
                 });
 
                 return {
@@ -351,15 +352,21 @@ router.get('/my-elections', authenticateToken, async (req, res) => {
         );
 
         // Filtrer les élections accessibles
+        console.log('Filtrage des élections accessibles...');
         const accessibleElections = electionsWithVoteStatus.filter(election =>
             isEligibleForElection(etudiant, election)
         );
-
         console.log('Élections accessibles:', accessibleElections.length);
+
+        console.log('=== FIN my-elections ===');
         res.json(accessibleElections);
 
     } catch (error) {
-        console.error('Erreur détaillée my-elections:', error);
+        console.error('=== ERREUR COMPLÈTE my-elections ===');
+        console.error('Message:', error.message);
+        console.error('Stack:', error.stack);
+        console.error('=== FIN ERREUR ===');
+
         res.status(500).json({
             message: 'Erreur serveur interne',
             error: error.message
