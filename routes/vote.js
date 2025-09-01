@@ -437,7 +437,7 @@ router.get('/status/:electionId', authenticateToken, async (req, res) => {
 });
 
 // Backend: créer cet endpoint
-router.get('/vote/my-votes', auth, async (req, res) => {
+router.get('/vote/my-votes', authenticateToken, async (req, res) => {
     try {
         const votes = await votes.find({ userId: req.user.id })
             .populate('electionId')
